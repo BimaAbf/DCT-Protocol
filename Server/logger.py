@@ -7,50 +7,77 @@ from ConsoleColor import console
 class Logger:
     def __init__(self, log_directory: str, filename_prefix: str = "server_log"):
 
-        self.csv_writer = None
-        self.csv_file = None
-        self.log_directory = log_directory
-        self.filename_prefix = filename_prefix
+        self.sheet = None
+        self.binder = None
+        self.vault_path = log_directory
+        self.tag_prefix = filename_prefix
+        self.registry = []
+        self._heading = ['device_id', 'seq', 'timestamp', 'arrival_time', 'duplicate_flag', 'gap_flag', 'delayed_flag']
 
     def start(self, start_time: float) -> bool:
         try:
-            os.makedirs(self.log_directory, exist_ok=True)
+            os.makedirs(self.vault_path, exist_ok=True)
 
-            time_str = time.strftime('%Y-%m-%d_%H-%M-%S', time.localtime(start_time))
-            filename = f"{self.filename_prefix}_{time_str}.csv"
-            filepath = os.path.join(self.log_directory, filename)
+            stamp = time.strftime('%Y-%m-%d_%H-%M-%S', time.localtime(start_time))
+            tagged_name = f"{self.tag_prefix}_{stamp}.csv"
+            storage_path = os.path.join(self.vault_path, tagged_name)
 
-            self.csv_file = open(filepath, 'w', newline='')
-            self.csv_writer = csv.writer(self.csv_file)
+            self.binder = open(storage_path, 'w', newline='')
+            self.sheet = csv.writer(self.binder)
+            self.registry = []
 
-            self.csv_writer.writerow(['device_id', 'seq', 'timestamp', 'arrival_time', 'duplicate_flag', 'gap_flag'])
+            self.sheet.writerow(self._heading)
 
-            console.log.green(f"[Logger] CSV logging active. Writing to {filepath}")
+            console.log.green(f"[Logger] CSV logging active. Writing to {storage_path}")
             return True
         except IOError as e:
             console.log.red(f"[Logger] FATAL: Could not open CSV file. {e}")
             return False
 
     def log_packet(self, device_id: int, seq_num: int, timestamp_s: float, arrival_time: float, is_duplicate: bool,
-                   is_gap: bool):
-        if self.csv_writer and self.csv_file:
+                   is_gap: bool, is_delayed: bool):
+        if self.sheet and self.binder:
             try:
-                human_readable_timestamp = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(timestamp_s))
-                human_readable_arrival = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(arrival_time))
-
-                self.csv_writer.writerow([
-                    device_id,
-                    seq_num,
-                    human_readable_timestamp,
-                    human_readable_arrival,
-                    1 if is_duplicate else 0,
-                    1 if is_gap else 0
-                ])
-                self.csv_file.flush()
+                record_line = {
+                    'device_id': device_id,
+                    'seq': seq_num,
+                    'timestamp_s': timestamp_s,
+                    'arrival_s': arrival_time,
+                    'duplicate': 1 if is_duplicate else 0,
+                    'gap': 1 if is_gap else 0,
+                    'delayed': 1 if is_delayed else 0
+                }
+                self.registry.append(record_line)
+                self._rewrite_sheet()
             except IOError as e:
                 console.log.red(f"[CSV Error] Failed to write to CSV file. {e}")
 
+    def _rewrite_sheet(self) -> None:
+        ordered_rows = sorted(
+            self.registry,
+            key=lambda entry: (entry['timestamp_s'], entry['arrival_s'], entry['seq'])
+        )
+
+        self.binder.seek(0)
+        self.binder.truncate(0)
+        self.sheet.writerow(self._heading)
+
+        for entry in ordered_rows:
+            readable_stamp = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(entry['timestamp_s']))
+            readable_arrival = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(entry['arrival_s']))
+            self.sheet.writerow([
+                entry['device_id'],
+                entry['seq'],
+                readable_stamp,
+                readable_arrival,
+                entry['duplicate'],
+                entry['gap'],
+                entry['delayed']
+            ])
+
+        self.binder.flush()
+
     def close(self):
-        if self.csv_file:
-            self.csv_file.close()
+        if self.binder:
+            self.binder.close()
             console.log.yellow("[Logger] CSV file closed.")

@@ -37,7 +37,7 @@ if __name__ == "__main__":
     server = Server(
         host=HOST,
         port=PORT,
-        csv_log_dir=CSV_LOG_DIR
+        csvLogDir=CSV_LOG_DIR
     )
 
     server.run()
