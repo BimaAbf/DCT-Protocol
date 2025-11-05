@@ -1,7 +1,5 @@
 import socket
-import struct
 import time
-import sys
 from typing import Dict, Any, Tuple
 from constants import *
 from ConsoleColor import console
@@ -128,10 +126,10 @@ class Server:
         self.device_db[new_id] = {
             'client_address': addr,
             'MAC': mac_addr_str,
-            'last_seq_num': -1,  # -1 indicates no packets received yet
+            'last_seq_num': -1,
             'base_time': 0,
             'last_seen': time.time(),
-            'current_value': 0  # To store last KEYFRAME values
+            'current_value': 0
         }
 
         console.log.blue(f"[STARTUP] Assigning DeviceID {new_id} to {addr} - MAC: {mac_addr_str}.")
