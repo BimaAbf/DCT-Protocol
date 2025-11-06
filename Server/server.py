@@ -39,7 +39,7 @@ class Server:
 
         console.log.green(f"[Initialization] Booting server...")
 
-        if not self.scribe.start(self.startTime):
+        if self.scribe.start(self.startTime) is False:
             console.log.red("[Initialization] FATAL: Could not start CSV logger.")
             sys.exit(1)
 
@@ -59,7 +59,7 @@ class Server:
 
     def run(self):
 
-        if not self.sock:
+        if self.sock is None:
             console.log.red("[Server Error] Server not started. Call start() first.")
             return
 
@@ -74,11 +74,10 @@ class Server:
 
     def _pollSocket(self) -> None:
         """Process a single receive/timeout cycle."""
-        if not self.sock:
+        if self.sock is None:
             return
 
         self.observeTimeouts()
-
         try:
             packetBlob, origin = self.sock.recvfrom(MAX_PACKET_SIZE)
         except socket.timeout:
@@ -221,7 +220,7 @@ class Server:
             console.log.red(f"[Socket Error] Could not send STARTUP_ACK to {origin}. {e}")
     def trackBatchTelemetry(self, metaTuple: tuple, payload: bytes, origin: Tuple[str, int], ingressEpoch: float):
         deviceId, msgType, seqNum, timestampOffset, payloadLen = metaTuple
-        if deviceId not in self.unitMap:
+        if self.unitMap.__contains__(deviceId) is False:
             console.log.yellow(f"[Packet Error] Received batch packet from unknown DeviceID {deviceId} at {origin}. Discarding.")
             self._sendRegistrationHint(origin, deviceId)
             return
@@ -257,9 +256,9 @@ class Server:
     def trackTelemetry(self, metaTuple: tuple, payload: bytes, origin: Tuple[str, int], ingressEpoch: float):
         deviceId, msgType, seqNum, timestampOffset, payloadLen = metaTuple
 
-        if deviceId not in self.unitMap:
+        if self.unitMap.__contains__(deviceId) is False:
             console.log.yellow(f"[Packet Error] Received packet from unknown DeviceID {deviceId} at {origin}. Discarding.")
-            self._sendRegistrationHint(origin, deviceId)
+            # self._sendRegistrationHint(origin, deviceId)
             return
 
         state = self.unitMap[deviceId]
@@ -336,101 +335,54 @@ class Server:
 
     def observeTimeouts(self):
         now = time.time()
-        if now - self.lastTimeoutSweep < 1.5:
+        if self.lastTimeoutSweep - now >= 1.5:
             return
-
         self.lastTimeoutSweep = now
-
         for deviceId, deviceProfile in list(self.unitMap.items()):
             lastTouch = deviceProfile.get('last_activity')
-            if lastTouch is None:
+            if not lastTouch:
                 lastTouch = deviceProfile.get('last_seen', 0)
-
             if deviceProfile.get('packet_count', 0) < 10:
                 continue
-
             idleSpan = now - lastTouch
             recentSpans = deviceProfile.get('interval_history')
             ceiling, avgInterval = self._deriveTimeout(recentSpans)
-            if ceiling is None:
+            if not ceiling:
                 continue
-
-            if (idleSpan >= ceiling and deviceProfile.get('status') != DeviceStatus.DOWN
-                and deviceProfile.get('status') != DeviceStatus.TIMEOUT):
-                if deviceProfile.get('timeout_reported'):
-                    continue
-                deviceProfile['timeout_reported'] = True
-                intervalNote = f"{avgInterval:.2f}s" if avgInterval else "n/a"
-                console.log.red(
-                    f"[Timeout] DeviceID {deviceId} idle for {idleSpan:.1f}s at {deviceProfile.get('bind_addr')} (interval {intervalNote}, threshold {ceiling:.1f}s, last gap: {deviceProfile.get('last_gap')})."
-                )
-    def _sendRegistrationHint(self, origin: Tuple[str, int], deviceId: int) -> None:
-        """Send a gentle nudge to clients that forgot to register."""
-        if not self.sock:
-            return
-
-        try:
-            ackHeader = struct.pack(
-                HEADER_FORMAT,
-                (PROTOCOL_VERSION << 4) | MSG_STARTUP_ACK,
-                0,
-                0,
-                0,
-                2
-            )
-            ackPayload = struct.pack('!H', 0)
-            self.sock.sendto(ackHeader + ackPayload, origin)
-            console.log.blue(
-                f"[STARTUP_ACK] Sent re-registration hint to {origin} for unknown DeviceID {deviceId}."
-            )
-        except socket.error as exc:
-            console.log.red(f"[Socket Error] Could not notify {origin} of missing registration. {exc}")
-
+            else:
+                if (idleSpan >= ceiling and deviceProfile.get('status') != DeviceStatus.DOWN
+                    and deviceProfile.get('status') != DeviceStatus.TIMEOUT):
+                    if deviceProfile.get('timeout_reported'):
+                        continue
+                    else:
+                        deviceProfile['timeout_reported'] = True
+                        intervalNote = f"{avgInterval:.2f}s" if avgInterval else "n/a"
+                        console.log.red(f"[Timeout] DeviceID {deviceId} idle for {idleSpan:.1f}s at {deviceProfile.get('bind_addr')} (interval {intervalNote}, threshold {ceiling:.1f}s, last gap: {deviceProfile.get('last_gap')}).")
     def _recordInterval(self, deviceState: Dict[str, Any], ingressEpoch: float, priorActivity: float | None) -> None:
-        """Update rolling interval statistics used for timeouts."""
-        if priorActivity is None:
+        if priorActivity is None or priorActivity >= ingressEpoch:
             return
-
-        intervalGap = ingressEpoch - priorActivity
-        if intervalGap <= 0:
-            return
-
-        history = deviceState.get('interval_history')
-        if history is not None:
-            history.append(intervalGap)
-
+        if deviceState.get('interval_history'):
+            deviceState.get('interval_history').append(ingressEpoch - priorActivity)
     def _deriveTimeout(self, history: Deque[float] | None) -> Tuple[float | None, float | None]:
-        """Derive timeout thresholds from recent inter-arrival spans."""
-        if not history:
+        if history is None:
             return None, None
-
-        totalSpan = 0.0
-        sampleCount = 0
-        for sample in history:
-            totalSpan += sample
-            sampleCount += 1
-
-        if sampleCount == 0:
-            return None, None
-
-        avgInterval = totalSpan / sampleCount
-        if avgInterval <= 0:
-            return None, None
-
-        return avgInterval * 10.0, avgInterval
-
+        samples = [sample for sample in history]
+        totalSpan = sum(samples)
+        sampleCount = len(samples)
+        return (None,None if (sampleCount == 0 or totalSpan <= 0) else
+        (totalSpan * 10.0 / sampleCount, totalSpan / sampleCount))
     def _classifySequence(self, deviceId: int, seqNum: int, state: Dict[str, Any]) -> Tuple[bool, bool, bool]:
         duplicateFlag,gapFlag,delayedFlag = False,False,False
 
         headSeq = state['current_seq']
-        if not headSeq:
+        if headSeq is None:
             state['current_seq'] = seqNum
             state['seen_set'].add(seqNum)
             state['seen_queue'].append(seqNum)
             return (duplicateFlag, gapFlag, delayedFlag)
         if seqNum in state['seen_set']:
             if state['batching']:
-                if not state['seen_count'].get(seqNum):
+                if state['seen_count'].get(seqNum) is None:
                     state['seen_count'][seqNum] = 1
                 if state['seen_count'][seqNum] <= state['batch_size']:
                     state['seen_count'][seqNum] = state['seen_count'][seqNum] + 1
