@@ -6,6 +6,9 @@ Example:
 """
 
 import argparse
+
+from numpy.ma.core import minimum
+
 from client import Client
 
 def main():
@@ -50,6 +53,23 @@ def main():
         default=100,
         help="Optional random seed for reproducible data simulation."
     )
+    parser.add_argument(
+        "--batching",
+        type=int,
+        default=1,
+        help="Number of packets to batch before sending (default: 1)."
+    )
+    # parser.add_argument(
+    #     "--quantum",
+    #     type=int,
+    #     default=0,
+    #     help="Quantization parameter (Multiplies by 10^value).")
+    parser.add_argument(
+        "--delta-thresh",
+        type=int,
+        default=5,
+        help="Minimum change in value to trigger sending a new packet (default: 5)."
+    )
 
     args = parser.parse_args()
 
@@ -60,7 +80,9 @@ def main():
         mac=args.mac,
         interval=args.interval,
         duration=args.duration,
-        seed=args.seed
+        seed=args.seed,
+        delta_thresh=args.delta_thresh,
+        batch_size=args.batching
     )
 
     # Run the client

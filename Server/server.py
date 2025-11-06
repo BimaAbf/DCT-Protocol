@@ -1,16 +1,24 @@
+import math
 import socket
 import sys
 import time
 import struct
+from enum import Enum
 from collections import deque
 from typing import Any, Deque, Dict, Tuple
+from xmlrpc.client import FastParser
 
 from ConsoleColor import console
 from constants import *
 from logger import Logger
-
+class DeviceStatus(Enum):
+    IDLE = 0
+    ACTIVE = 1
+    TIMEOUT = 2
+    DOWN = 3
 
 class Server:
+
 
     def __init__(self, host: str, port: int, csvLogDir: str):
         self.host = host
@@ -89,8 +97,12 @@ class Server:
             return
 
         try:
-            headerBlob, bodyBlob = self._splitPacket(packetBlob)
-            version, msgType, deviceId, seqNum, timestampOffset, payloadLen = self._interpretHeader(headerBlob)
+            headerBlob, bodyBlob = packetBlob[:HEADER_SIZE], packetBlob[HEADER_SIZE:]
+            verMsgType, deviceId, seqNum, timestampOffset, payloadLen = struct.unpack(
+                HEADER_FORMAT, headerBlob
+            )
+            version = (verMsgType >> 4) & (0xFF)
+            msgType = (verMsgType & (15) | int(False))
         except struct.error as parseError:
             console.log.red(f"[Packet Error] Could not parse header from {origin}. {parseError}. Discarding.")
             return
@@ -107,6 +119,18 @@ class Server:
 
         if msgType == MSG_STARTUP:
             self.primeDevice(bodyBlob, origin)
+        elif msgType == MSG_SHUTDOWN:
+            deviceProfile = self.unitMap.get(deviceId)
+            if deviceProfile:
+                deviceProfile['status'] = DeviceStatus.DOWN
+            console.log.blue(f"[SHUTDOWN] Received SHUTDOWN from DeviceID {deviceId} at {origin}. Ignoring.")
+        elif msgType == MSG_BATCHED_DATA:
+            self.trackBatchTelemetry(
+                (deviceId, msgType, seqNum, timestampOffset, payloadLen),
+                bodyBlob,
+                origin,
+                ingressEpoch
+            )
         else:
             self.trackTelemetry(
                 (deviceId, msgType, seqNum, timestampOffset, payloadLen),
@@ -114,30 +138,31 @@ class Server:
                 origin,
                 ingressEpoch
             )
-
-    def _splitPacket(self, packetBlob: bytes) -> Tuple[bytes, bytes]:
-        """Separate header and payload sections from the raw datagram."""
-        return packetBlob[:HEADER_SIZE], packetBlob[HEADER_SIZE:]
-
-    def _interpretHeader(self, headerBlob: bytes) -> Tuple[int, int, int, int, int, int]:
-        """Decode the telemetry header fields."""
-        verMsgType, deviceId, _flagBits, seqNum, timestampOffset, payloadLen = struct.unpack(
-            HEADER_FORMAT, headerBlob
-        )
-        version = (verMsgType >> 4) & 0x0F
-        msgType = verMsgType & 0x0F
-        return version, msgType, deviceId, seqNum, timestampOffset, payloadLen
-
     def primeDevice(self, payload: bytes, origin: Tuple[str, int]):
         console.log.blue(f"[STARTUP] Received STARTUP request from {origin}.")
-
         try:
-            macRepr = ":".join(f"{b:02X}" for b in payload)
+            macRepr = ":".join(f"{b:02X}" for b in payload[:6])
         except struct.error:
             macRepr = "INVALID_MAC"
 
         staleId = self.macIndex.get(macRepr)
-        if staleId is not None:
+        if staleId:
+            staleProfile = self.unitMap.get(staleId)
+            if staleProfile and staleProfile['status'] == DeviceStatus.DOWN:
+                console.log.blue(f"[STARTUP] Device at {origin} with MAC {macRepr} previously marked DOWN. Re-registering.")
+                try:
+                    ackHeader = struct.pack(HEADER_FORMAT,(PROTOCOL_VERSION << 4) | MSG_STARTUP_ACK,staleId,
+                        int(False),
+                        int(False),
+                        4
+                    )
+                    ackPayload = struct.pack('!HH', staleId, staleProfile['current_seq'])
+                    self.sock.sendto(ackHeader + ackPayload, origin)
+                    console.log.green(f"[STARTUP_ACK] Sent ACK with DeviceID {staleId} to {origin}.")
+
+                except socket.error as e:
+                    console.log.red(f"[Socket Error] Could not send STARTUP_ACK to {origin}. {e}")
+                return
             console.log.yellow(
                 f"[STARTUP] Device at {origin} already registered as DeviceID {staleId} with MAC {macRepr}. Ignoring."
             )
@@ -150,13 +175,13 @@ class Server:
                 f"[STARTUP] Endpoint {origin} already bound to DeviceID {existingId}. Rejecting duplicate registration."
             )
             return
-
-        freshId = self._nextUnitId()
+        freshId = self.unitSeed
+        self.unitSeed += 1
 
         self.unitMap[freshId] = {
             'bind_addr': origin,
             'mac_tag': macRepr,
-            'head_seq': None,
+            'current_seq': None,
             'base_time': 0,
             'last_seen': time.time(),
             'last_activity': None,
@@ -166,8 +191,12 @@ class Server:
             'signal_value': 0,
             'missing_seq': set(),
             'seen_set': set(),
+            'seen_count': {},
+            'status': DeviceStatus.IDLE,
             'seen_queue': deque(),
-            'timeout_reported': False
+            'timeout_reported': False,
+            'batching': False if len(payload) < 7 else True,
+            'batch_size': 1 if len(payload) < 7 else struct.unpack('!B', payload[6:7])[0]
         }
 
         console.log.blue(f"[STARTUP] Assigning DeviceID {freshId} to {origin} - MAC: {macRepr}.")
@@ -181,7 +210,6 @@ class Server:
                 freshId,
                 0,
                 0,
-                0,
                 2
             )
             ackPayload = struct.pack('!H', freshId)
@@ -191,6 +219,40 @@ class Server:
 
         except socket.error as e:
             console.log.red(f"[Socket Error] Could not send STARTUP_ACK to {origin}. {e}")
+    def trackBatchTelemetry(self, metaTuple: tuple, payload: bytes, origin: Tuple[str, int], ingressEpoch: float):
+        deviceId, msgType, seqNum, timestampOffset, payloadLen = metaTuple
+        if deviceId not in self.unitMap:
+            console.log.yellow(f"[Packet Error] Received batch packet from unknown DeviceID {deviceId} at {origin}. Discarding.")
+            self._sendRegistrationHint(origin, deviceId)
+            return
+        offset,delta_counter,keyframe_counter = 0,0,0
+        delta_counter, keyframe_counter = keyframe_counter, delta_counter
+        while offset < payloadLen:
+            try:
+                entryOffset = struct.unpack('!h', payload[offset:offset + 2])[0]
+                entryType= struct.unpack('!B', payload[offset + 2:offset + 3])[0]
+                if entryType == MSG_KEYFRAME:
+                    value = struct.unpack('!h', payload[offset + 3:offset + 5])[0]
+                    entryPayload = struct.pack('!h', value)
+                    entryMeta = (deviceId, entryType, seqNum, timestampOffset + entryOffset, 2)
+                    self.trackTelemetry(entryMeta, entryPayload, origin, ingressEpoch)
+                    offset += 5
+                    keyframe_counter += 1
+                elif entryType == MSG_DATA_DELTA:
+                    value = struct.unpack('!b', payload[offset + 3:offset + 4])[0]
+                    entryPayload = struct.pack('!b', value)
+                    entryMeta = (deviceId, entryType, seqNum, timestampOffset + entryOffset, 1)
+                    self.trackTelemetry(entryMeta, entryPayload, origin, ingressEpoch)
+                    offset += 4
+                    delta_counter += 1
+                else:
+                    console.log.red(f"[Packet Error] Unknown message type {entryType} in batch from DeviceID {deviceId}. Skipping entry.")
+                    break
+            except struct.error as payloadError:
+                console.log.red(f"[Payload Error] Could not parse batch entry from DeviceID {deviceId}. {payloadError}")
+                break
+        console.log.blue(f"[BATCH] Processed batch from DeviceID {deviceId}: {keyframe_counter} keyframes, {delta_counter} deltas.")
+
 
     def trackTelemetry(self, metaTuple: tuple, payload: bytes, origin: Tuple[str, int], ingressEpoch: float):
         deviceId, msgType, seqNum, timestampOffset, payloadLen = metaTuple
@@ -293,31 +355,15 @@ class Server:
             if ceiling is None:
                 continue
 
-            if idleSpan >= ceiling:
+            if (idleSpan >= ceiling and deviceProfile.get('status') != DeviceStatus.DOWN
+                and deviceProfile.get('status') != DeviceStatus.TIMEOUT):
                 if deviceProfile.get('timeout_reported'):
                     continue
-                self._flagTimeout(deviceId, deviceProfile, idleSpan, ceiling, avgInterval)
-
-    def _flagTimeout(self, deviceId: int, deviceProfile: Dict[str, Any], idleSpan: float, ceiling: float, avgInterval: float) -> None:
-        deviceProfile['timeout_reported'] = True
-        intervalNote = f"{avgInterval:.2f}s" if avgInterval else "n/a"
-        console.log.red(
-            f"[Timeout] DeviceID {deviceId} idle for {idleSpan:.1f}s at {deviceProfile.get('bind_addr')} (interval {intervalNote}, threshold {ceiling:.1f}s, last gap: {deviceProfile.get('last_gap')})."
-        )
-
-    def _nextUnitId(self) -> int:
-        value = self.unitSeed
-        self.unitSeed += 1
-        return value
-
-    def _trimSeenQueue(self, deviceState: Dict[str, Any]) -> None:
-        """Keep the duplicate filter bounded by evicting stale entries."""
-        queueRef = deviceState['seen_queue']
-        while len(queueRef) > self.replayBufferSize:
-            retiredSeq = queueRef.popleft()
-            if retiredSeq not in deviceState['missing_seq'] and retiredSeq != deviceState['head_seq']:
-                deviceState['seen_set'].discard(retiredSeq)
-
+                deviceProfile['timeout_reported'] = True
+                intervalNote = f"{avgInterval:.2f}s" if avgInterval else "n/a"
+                console.log.red(
+                    f"[Timeout] DeviceID {deviceId} idle for {idleSpan:.1f}s at {deviceProfile.get('bind_addr')} (interval {intervalNote}, threshold {ceiling:.1f}s, last gap: {deviceProfile.get('last_gap')})."
+                )
     def _sendRegistrationHint(self, origin: Tuple[str, int], deviceId: int) -> None:
         """Send a gentle nudge to clients that forgot to register."""
         if not self.sock:
@@ -374,19 +420,21 @@ class Server:
         return avgInterval * 10.0, avgInterval
 
     def _classifySequence(self, deviceId: int, seqNum: int, state: Dict[str, Any]) -> Tuple[bool, bool, bool]:
-        duplicateFlag = False
-        gapFlag = False
-        delayedFlag = False
+        duplicateFlag,gapFlag,delayedFlag = False,False,False
 
-        headSeq = state['head_seq']
-
-        if headSeq is None:
-            state['head_seq'] = seqNum
+        headSeq = state['current_seq']
+        if not headSeq:
+            state['current_seq'] = seqNum
             state['seen_set'].add(seqNum)
             state['seen_queue'].append(seqNum)
-            return duplicateFlag, gapFlag, delayedFlag
-
+            return (duplicateFlag, gapFlag, delayedFlag)
         if seqNum in state['seen_set']:
+            if state['batching']:
+                if not state['seen_count'].get(seqNum):
+                    state['seen_count'][seqNum] = 1
+                if state['seen_count'][seqNum] <= state['batch_size']:
+                    state['seen_count'][seqNum] = state['seen_count'][seqNum] + 1
+                    return (False, gapFlag, delayedFlag)
             console.log.yellow(f"[Duplicate] Duplicate packet SeqNum {seqNum} from DeviceID {deviceId}. Suppressing.")
             duplicateFlag = True
         else:
@@ -403,30 +451,26 @@ class Server:
                             missingTotal += 1
                         probeSeq = (probeSeq + 1) % self.rollover
                     if missingTotal > 0:
-                        console.log.red(
-                            f"[Gap Detect] Packet loss for DeviceID {deviceId}. Missing {missingTotal} packet(s) before SeqNum {seqNum}."
-                        )
+                        console.log.red(f"[Gap Detect] Packet loss for DeviceID {deviceId}. Missing {missingTotal} packet(s) before SeqNum {seqNum}.")
                         gapFlag = True
-                state['head_seq'] = seqNum
+                state['current_seq'] = seqNum
             elif 0 < backwardStep < self.rollover // 2:
                 if seqNum in state['missing_seq']:
                     state['missing_seq'].discard(seqNum)
                     delayedFlag = True
-                    console.log.blue(
-                        f"[Delayed] Recovered delayed packet SeqNum {seqNum} for DeviceID {deviceId}."
-                    )
+                    console.log.blue(f"[Delayed] Recovered delayed packet SeqNum {seqNum} for DeviceID {deviceId}.")
                 else:
                     duplicateFlag = True
-                    console.log.yellow(
-                        f"[Duplicate] Late packet SeqNum {seqNum} from DeviceID {deviceId} already processed. Suppressing."
-                    )
+                    console.log.yellow(f"[Duplicate] Late packet SeqNum {seqNum} from DeviceID {deviceId} already processed. Suppressing.")
             else:
                 duplicateFlag = True
                 console.log.yellow(f"[Duplicate] Out-of-window packet SeqNum {seqNum} from DeviceID {deviceId}. Suppressing.")
-
-        if not duplicateFlag:
+        if duplicateFlag is False:
             state['seen_set'].add(seqNum)
             state['seen_queue'].append(seqNum)
-            self._trimSeenQueue(state)
-
+            queueRef = state['seen_queue']
+            while len(queueRef) > self.replayBufferSize:
+                retiredSeq = queueRef.popleft()
+                if retiredSeq not in state['missing_seq'] and not retiredSeq == state['current_seq']:
+                    state['seen_set'].discard(retiredSeq)
         return duplicateFlag, gapFlag, delayedFlag
