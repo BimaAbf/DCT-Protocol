@@ -259,7 +259,6 @@ class Server:
             return
 
         offset, delta_counter,keyframe_counter = 0,0,0
-
         while offset < payloadLen:
 
             try:
@@ -270,7 +269,7 @@ class Server:
 
                     value = struct.unpack('!h', payload[offset + 3:offset + 5])[0]
                     entryPayload = struct.pack('!h', value)
-                    entryMeta = (deviceId, entryType, seqNum, timestampOffset + entryOffset, 2)
+                    entryMeta = (deviceId, entryType, seqNum, timestampOffset + entryOffset, payloadLen)
 
                     self.trackTelemetry(entryMeta, entryPayload, origin, ingressTime, cpu_start)
                     offset += 5
@@ -280,7 +279,7 @@ class Server:
 
                     value = struct.unpack('!b', payload[offset + 3:offset + 4])[0]
                     entryPayload = struct.pack('!b', value)
-                    entryMeta = (deviceId, entryType, seqNum, timestampOffset + entryOffset, 1)
+                    entryMeta = (deviceId, entryType, seqNum, timestampOffset + entryOffset,payloadLen)
 
                     self.trackTelemetry(entryMeta, entryPayload, origin, ingressTime, cpu_start)
                     offset += 4
