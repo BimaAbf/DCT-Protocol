@@ -147,7 +147,7 @@ class Server:
                 state['base_time'] = baseTimeVal
                 console.log.blue(f"[TIME_SYNC] DeviceID {deviceId} set base time to {time.ctime(baseTimeVal)}.")
                 duplicateFlag, gapFlag, delayedFlag = self.classifyPacket(deviceId, seqNum, state)
-                self.csvLogger.log_packet(deviceId, seqNum, baseTimeVal + timestampOffset, ingressTime, duplicateFlag, gapFlag,
+                self.csvLogger.log_packet(msgType,deviceId, seqNum, baseTimeVal + timestampOffset, ingressTime,-1 ,duplicateFlag, gapFlag,
                                           delayedFlag)
             except struct.error as timeError:
                 console.log.red(f"[Payload Error] Could not parse TIME_SYNC payload from DeviceID {deviceId}. {timeError}")
@@ -173,11 +173,9 @@ class Server:
             staleProfile = self.unitMap.get(staleId)
         
             if staleProfile and staleProfile['status'] == DeviceStatus.DOWN:
-
                 console.log.blue(f"[STARTUP] Device at {origin} with MAC {macRepr} previously marked. Re-registering.")
-        
+                self.csvLogger.log_packet(MSG_STARTUP,staleId, 0, time.time(), time.time(), -1 ,False, False,False)
                 try:
-        
                     ackHeader = struct.pack(HEADER_FORMAT,(PROTOCOL_VERSION << 4) | MSG_STARTUP_ACK,staleId, int(False), int(False), 4)
                     ackPayload = struct.pack('!HH', staleId, staleProfile['current_seq'])
                     
@@ -231,9 +229,8 @@ class Server:
         }
 
         console.log.blue(f"[STARTUP] Assigning DeviceID {freshId} to {origin} - MAC: {macRepr}.")
-
+        self.csvLogger.log_packet(MSG_STARTUP, freshId, 0, time.time(), time.time(), -1, False, False, False)
         self.macIndex[macRepr] = freshId
-
         try:
 
             ackHeader = struct.pack( HEADER_FORMAT,(PROTOCOL_VERSION << 4) | MSG_STARTUP_ACK, freshId, 0, 0,2)
@@ -308,7 +305,6 @@ class Server:
         baseTime = state['base_time']
         fullTimestamp = baseTime + timestampOffset
 
-        self.csvLogger.log_packet(deviceId, seqNum, fullTimestamp, ingressTime, duplicateFlag, gapFlag,delayedFlag )
 
         if duplicateFlag:
             return
@@ -325,7 +321,7 @@ class Server:
 
         state['packet_count'] = state.get('packet_count', 0) + 1
 
-        if priorActivity is None or priorActivity >= ingressTime:
+        if msgType != MSG_KEYFRAME and (priorActivity is None or priorActivity >= ingressTime):
             return
 
         if state.get('interval_history'):
@@ -333,20 +329,15 @@ class Server:
 
         try:
             if msgType == MSG_KEYFRAME:
-            
-                for slot in range(0, payloadLen, 2):
-                    valueBe = int(struct.unpack('!h', payload[slot:slot + 2])[0])
-                    state['signal_value'] = valueBe
-
+                valueBe = int(struct.unpack('!h', payload)[0])
+                state['signal_value'] = valueBe
+                self.csvLogger.log_packet(msgType, deviceId, seqNum, fullTimestamp, ingressTime, valueBe,duplicateFlag, gapFlag, delayedFlag)
             elif msgType == MSG_DATA_DELTA:
-            
-                for slot in range(0, payloadLen, 1):
-            
-                    deltaVal = int(struct.unpack('!b', payload[slot:slot + 1])[0])
-                    oldValue = state['signal_value']
-                    newValue = oldValue + deltaVal
-                    state['signal_value'] = newValue
-
+                deltaVal = int(struct.unpack('!b', payload)[0])
+                oldValue = state['signal_value']
+                newValue = oldValue + deltaVal
+                state['signal_value'] = newValue
+                self.csvLogger.log_packet(msgType, deviceId, seqNum, fullTimestamp, ingressTime, newValue,duplicateFlag, gapFlag,delayedFlag)
             elif msgType == MSG_HEARTBEAT:
                 console.log.blue(f"[HEARTBEAT] Liveness ping from DeviceID {deviceId}.")
 
@@ -424,7 +415,7 @@ class Server:
             state['seen_queue'].append(seqNum)
             return (duplicateFlag, gapFlag, delayedFlag)
 
-        if seqNum in state['seen_set']:
+        if seqNum in state['seen_set'] and seqNum != 0:
 
             if state['batching']:
                 if state['seen_count'].get(seqNum) is None:
