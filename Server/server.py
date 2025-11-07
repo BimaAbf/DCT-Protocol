@@ -97,6 +97,7 @@ class Server:
         self.processPacket(incomingPacket, origin, ingressTime)
 
     def processPacket(self, incommingPakcet: bytes, origin: Tuple[str, int], ingressTime: float):
+        cpu_start = time.perf_counter()
 
         if len(incommingPakcet) < HEADER_SIZE:
             console.log.yellow(f"[Packet Error] Runt packet received from {origin}. Discarding.")
@@ -127,7 +128,7 @@ class Server:
             return
 
         if msgType == MSG_STARTUP:
-            self.deviceRegisteration(bodyBlob, origin)
+            self.deviceRegisteration(bodyBlob, origin, cpu_start)
         
         elif msgType == MSG_SHUTDOWN:
             deviceProfile = self.unitMap.get(deviceId)
@@ -139,8 +140,7 @@ class Server:
             console.log.blue(f"[SHUTDOWN] Received SHUTDOWN from DeviceID {deviceId} at {origin}. Ignoring.")
         
         elif msgType == MSG_BATCHED_DATA:
-        
-            self.BatchTelemetry((deviceId, msgType, seqNum, timestampOffset, payloadLen), bodyBlob, origin, ingressTime )
+            self.BatchTelemetry((deviceId, msgType, seqNum, timestampOffset, payloadLen), bodyBlob, origin, ingressTime, cpu_start)
         elif msgType == MSG_TIME_SYNC:
             state = self.unitMap.get(deviceId)
             try:
@@ -148,17 +148,17 @@ class Server:
                 state['base_time'] = baseTimeVal
                 console.log.blue(f"[TIME_SYNC] DeviceID {deviceId} set base time to {time.ctime(baseTimeVal)}.")
                 duplicateFlag, gapFlag, delayedFlag = self.classifyPacket(deviceId, seqNum, state)
+                cpu_duration = time.perf_counter() - cpu_start
                 self.csvLogger.log_packet(msgType,deviceId, seqNum, baseTimeVal + timestampOffset, ingressTime,-1 ,duplicateFlag, gapFlag,
-                                          delayedFlag)
+                                          delayedFlag, cpu_duration)
             except struct.error as timeError:
                 console.log.red(f"[Payload Error] Could not parse TIME_SYNC payload from DeviceID {deviceId}. {timeError}")
         else:
             self.trackTelemetry(
-                (deviceId, msgType, seqNum, timestampOffset, payloadLen), bodyBlob, origin, ingressTime )
+                (deviceId, msgType, seqNum, timestampOffset, payloadLen), bodyBlob, origin, ingressTime, cpu_start )
             
             
-    def deviceRegisteration(self, payload: bytes, origin: Tuple[str, int]):
-        
+    def deviceRegisteration(self, payload: bytes, origin: Tuple[str, int], cpu_start: float = None):
         console.log.blue(f"[STARTUP] Received STARTUP request from {origin}.")
 
         try:
@@ -175,7 +175,8 @@ class Server:
         
             if staleProfile and staleProfile['status'] == DeviceStatus.DOWN:
                 console.log.blue(f"[STARTUP] Device at {origin} with MAC {macRepr} previously marked. Re-registering.")
-                self.csvLogger.log_packet(MSG_STARTUP,staleId, staleProfile['current_seq'], time.time(), time.time(), -1 ,False, False,False)
+                cpu_duration = time.perf_counter() - cpu_start
+                self.csvLogger.log_packet(MSG_STARTUP,staleId, staleProfile['current_seq'], time.time(), time.time(), -1 ,False, False,False, cpu_duration)
                 if len(payload) >= 7:
                     staleProfile['batching'] = True
                     staleProfile['batch_size'] = struct.unpack('!B', payload[6:7])[0]
@@ -233,7 +234,8 @@ class Server:
         }
 
         console.log.blue(f"[STARTUP] Assigning DeviceID {freshId} to {origin} - MAC: {macRepr}.")
-        self.csvLogger.log_packet(MSG_STARTUP, freshId, 0, time.time(), time.time(), -1, False, False, False)
+        cpu_duration = time.perf_counter() - cpu_start
+        self.csvLogger.log_packet(MSG_STARTUP, freshId, 0, time.time(), time.time(), -1, False, False, False, cpu_duration)
         self.macIndex[macRepr] = freshId
         try:
 
@@ -247,8 +249,7 @@ class Server:
             console.log.red(f"[Socket Error] Could not send STARTUP_ACK to {origin}. {e}")
 
 
-    def BatchTelemetry(self, metaTuple: tuple, payload: bytes, origin: Tuple[str, int], ingressTime: float):
-
+    def BatchTelemetry(self, metaTuple: tuple, payload: bytes, origin: Tuple[str, int], ingressTime: float,cpu_start: float):
         deviceId, msgType, seqNum, timestampOffset, payloadLen = metaTuple
 
         if self.unitMap.__contains__(deviceId) is False:
@@ -269,7 +270,7 @@ class Server:
                     entryPayload = struct.pack('!h', value)
                     entryMeta = (deviceId, entryType, seqNum, timestampOffset + entryOffset, 2)
 
-                    self.trackTelemetry(entryMeta, entryPayload, origin, ingressTime)
+                    self.trackTelemetry(entryMeta, entryPayload, origin, ingressTime, cpu_start)
                     offset += 5
                     keyframe_counter += 1
 
@@ -279,7 +280,7 @@ class Server:
                     entryPayload = struct.pack('!b', value)
                     entryMeta = (deviceId, entryType, seqNum, timestampOffset + entryOffset, 1)
 
-                    self.trackTelemetry(entryMeta, entryPayload, origin, ingressTime)
+                    self.trackTelemetry(entryMeta, entryPayload, origin, ingressTime, cpu_start)
                     offset += 4
                     delta_counter += 1
 
@@ -294,7 +295,7 @@ class Server:
         console.log.blue(f"[BATCH] Processed batch from DeviceID {deviceId}: {keyframe_counter} keyframes, {delta_counter} deltas.")
 
 
-    def trackTelemetry(self, metaTuple: tuple, payload: bytes, origin: Tuple[str, int], ingressTime: float):
+    def trackTelemetry(self, metaTuple: tuple, payload: bytes, origin: Tuple[str, int], ingressTime: float, cpu_start: float):
 
         deviceId, msgType, seqNum, timestampOffset, payloadLen = metaTuple
 
@@ -314,7 +315,9 @@ class Server:
             return
 
         priorActivity = state.get('last_activity')
-
+        if priorActivity is None:
+            state['last_activity'] = ingressTime
+            priorActivity = ingressTime
         state['last_seen'] = time.time()
         state['last_activity'] = ingressTime
         state['last_gap'] = gapFlag
@@ -325,23 +328,23 @@ class Server:
 
         state['packet_count'] = state.get('packet_count', 0) + 1
 
-        if msgType != MSG_KEYFRAME and (priorActivity is None or priorActivity >= ingressTime):
-            return
-
-        if state.get('interval_history'):
-            state.get('interval_history').append(ingressTime - priorActivity)
+        # if msgType != MSG_KEYFRAME and (priorActivity is None or priorActivity >= ingressTime):
+        #     return
+        state.get('interval_history').append(ingressTime - priorActivity)
 
         try:
             if msgType == MSG_KEYFRAME:
                 valueBe = int(struct.unpack('!h', payload)[0])
                 state['signal_value'] = valueBe
-                self.csvLogger.log_packet(msgType, deviceId, seqNum, fullTimestamp, ingressTime, valueBe,duplicateFlag, gapFlag, delayedFlag)
+                cpu_duration = time.perf_counter() - cpu_start
+                self.csvLogger.log_packet(msgType, deviceId, seqNum, fullTimestamp, ingressTime, valueBe,duplicateFlag, gapFlag, delayedFlag, cpu_duration)
             elif msgType == MSG_DATA_DELTA:
                 deltaVal = int(struct.unpack('!b', payload)[0])
                 oldValue = state['signal_value']
                 newValue = oldValue + deltaVal
                 state['signal_value'] = newValue
-                self.csvLogger.log_packet(msgType, deviceId, seqNum, fullTimestamp, ingressTime, newValue,duplicateFlag, gapFlag,delayedFlag)
+                cpu_duration = time.perf_counter() - cpu_start
+                self.csvLogger.log_packet(msgType, deviceId, seqNum, fullTimestamp, ingressTime, newValue,duplicateFlag, gapFlag,delayedFlag, cpu_duration)
             elif msgType == MSG_HEARTBEAT:
                 console.log.blue(f"[HEARTBEAT] Liveness ping from DeviceID {deviceId}.")
 

@@ -12,7 +12,7 @@ class Logger:
         self.vault_path = log_directory
         self.tag_prefix = filename_prefix
         self.registry = []
-        self._heading = ['msg_type','device_id', 'seq', 'timestamp', 'arrival_time', 'value','duplicate_flag', 'gap_flag', 'delayed_flag']
+        self._heading = ['msg_type','device_id', 'seq', 'timestamp', 'arrival_time', 'value','duplicate_flag', 'gap_flag', 'delayed_flag', 'cpu_time_ms']
 
     def start(self, start_time: float) -> bool:
         try:
@@ -35,9 +35,10 @@ class Logger:
             return False
 
     def log_packet(self,message_type : int, device_id: int, seq_num: int, timestamp_s: float, arrival_time: float, value : int,is_duplicate: bool,
-                   is_gap: bool, is_delayed: bool):
+                   is_gap: bool, is_delayed: bool, cpu_time_s: float):
         if self.sheet and self.binder:
             try:
+                cpu_ms = cpu_time_s * 1000.0
                 record_line = {
                     'msg_type': message_type,
                     'device_id': device_id,
@@ -47,7 +48,8 @@ class Logger:
                     'value' : value,
                     'duplicate': 1 if is_duplicate else 0,
                     'gap': 1 if is_gap else 0,
-                    'delayed': 1 if is_delayed else 0
+                    'delayed': 1 if is_delayed else 0,
+                    'cpu_time_ms': cpu_ms
                 }
                 self.registry.append(record_line)
                 self._rewrite_sheet()
@@ -76,7 +78,8 @@ class Logger:
                 entry['value'],
                 entry['duplicate'],
                 entry['gap'],
-                entry['delayed']
+                entry['delayed'],
+                entry['cpu_time_ms']
             ])
 
         self.binder.flush()
