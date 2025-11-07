@@ -150,7 +150,7 @@ class Server:
                 duplicateFlag, gapFlag, delayedFlag = self.classifyPacket(deviceId, seqNum, state)
                 cpu_duration = time.perf_counter() - cpu_start
                 self.csvLogger.log_packet(msgType,deviceId, seqNum, baseTimeVal + timestampOffset, ingressTime,-1 ,duplicateFlag, gapFlag,
-                                          delayedFlag, cpu_duration)
+                                          delayedFlag, cpu_duration,HEADER_SIZE + payloadLen)
             except struct.error as timeError:
                 console.log.red(f"[Payload Error] Could not parse TIME_SYNC payload from DeviceID {deviceId}. {timeError}")
         else:
@@ -176,7 +176,8 @@ class Server:
             if staleProfile and staleProfile['status'] == DeviceStatus.DOWN:
                 console.log.blue(f"[STARTUP] Device at {origin} with MAC {macRepr} previously marked. Re-registering.")
                 cpu_duration = time.perf_counter() - cpu_start
-                self.csvLogger.log_packet(MSG_STARTUP,staleId, staleProfile['current_seq'], time.time(), time.time(), -1 ,False, False,False, cpu_duration)
+                self.csvLogger.log_packet(MSG_STARTUP,staleId, staleProfile['current_seq'], time.time(), time.time(), -1 ,
+                                          False, False,False, cpu_duration, HEADER_SIZE + len(payload))
                 if len(payload) >= 7:
                     staleProfile['batching'] = True
                     staleProfile['batch_size'] = struct.unpack('!B', payload[6:7])[0]
@@ -235,7 +236,8 @@ class Server:
 
         console.log.blue(f"[STARTUP] Assigning DeviceID {freshId} to {origin} - MAC: {macRepr}.")
         cpu_duration = time.perf_counter() - cpu_start
-        self.csvLogger.log_packet(MSG_STARTUP, freshId, 0, time.time(), time.time(), -1, False, False, False, cpu_duration)
+        self.csvLogger.log_packet(MSG_STARTUP, freshId, 0, time.time(), time.time(), -1,
+                                  False, False, False, cpu_duration, HEADER_SIZE + len(payload))
         self.macIndex[macRepr] = freshId
         try:
 
@@ -337,14 +339,16 @@ class Server:
                 valueBe = int(struct.unpack('!h', payload)[0])
                 state['signal_value'] = valueBe
                 cpu_duration = time.perf_counter() - cpu_start
-                self.csvLogger.log_packet(msgType, deviceId, seqNum, fullTimestamp, ingressTime, valueBe,duplicateFlag, gapFlag, delayedFlag, cpu_duration)
+                self.csvLogger.log_packet(msgType, deviceId, seqNum, fullTimestamp, ingressTime, valueBe,
+                                          duplicateFlag, gapFlag, delayedFlag, cpu_duration, HEADER_SIZE + payloadLen)
             elif msgType == MSG_DATA_DELTA:
                 deltaVal = int(struct.unpack('!b', payload)[0])
                 oldValue = state['signal_value']
                 newValue = oldValue + deltaVal
                 state['signal_value'] = newValue
                 cpu_duration = time.perf_counter() - cpu_start
-                self.csvLogger.log_packet(msgType, deviceId, seqNum, fullTimestamp, ingressTime, newValue,duplicateFlag, gapFlag,delayedFlag, cpu_duration)
+                self.csvLogger.log_packet(msgType, deviceId, seqNum, fullTimestamp, ingressTime, newValue,
+                                          duplicateFlag, gapFlag,delayedFlag, cpu_duration, HEADER_SIZE + payloadLen)
             elif msgType == MSG_HEARTBEAT:
                 console.log.blue(f"[HEARTBEAT] Liveness ping from DeviceID {deviceId}.")
 
