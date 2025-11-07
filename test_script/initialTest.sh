@@ -176,7 +176,7 @@ done
 
 } >"$CLIENT_LOG"
 
-METRICS_SCRIPT="$SCRIPT_DIR/../Analysis/simple_metrics.py"
+METRICS_SCRIPT="$SCRIPT_DIR/../Analysis/metrics.py"
 if [[ -f "$METRICS_SCRIPT" ]]; then
 	if ! "$PYTHON_BIN" "$METRICS_SCRIPT" --output "$RUN_DIR/metrics.csv"; then
 		echo "Metric extraction failed" >&2
