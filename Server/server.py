@@ -332,12 +332,11 @@ class Server:
         # if msgType != MSG_KEYFRAME and (priorActivity is None or priorActivity >= ingressTime):
         #     return
         state.get('interval_history').append(ingressTime - priorActivity)
-
+        cpu_duration = time.perf_counter() - cpu_start
         try:
             if msgType == MSG_KEYFRAME:
                 valueBe = int(struct.unpack('!h', payload)[0])
                 state['signal_value'] = valueBe
-                cpu_duration = time.perf_counter() - cpu_start
                 self.csvLogger.log_packet(msgType, deviceId, seqNum, fullTimestamp, ingressTime, valueBe,
                                           duplicateFlag, gapFlag, delayedFlag, cpu_duration, HEADER_SIZE + payloadLen)
             elif msgType == MSG_DATA_DELTA:
@@ -345,12 +344,12 @@ class Server:
                 oldValue = state['signal_value']
                 newValue = oldValue + deltaVal
                 state['signal_value'] = newValue
-                cpu_duration = time.perf_counter() - cpu_start
                 self.csvLogger.log_packet(msgType, deviceId, seqNum, fullTimestamp, ingressTime, newValue,
                                           duplicateFlag, gapFlag,delayedFlag, cpu_duration, HEADER_SIZE + payloadLen)
             elif msgType == MSG_HEARTBEAT:
                 console.log.blue(f"[HEARTBEAT] Liveness ping from DeviceID {deviceId}.")
-
+                self.csvLogger.log_packet(msgType, deviceId, seqNum, fullTimestamp, ingressTime, state['signal_value'],
+                                          duplicateFlag, gapFlag, delayedFlag, cpu_duration, HEADER_SIZE + payloadLen)
             else:
                 console.log.yellow(f"[Packet Error] Unknown message type {msgType} from DeviceID {deviceId}. Discarding.")
 
