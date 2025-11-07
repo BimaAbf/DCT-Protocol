@@ -125,7 +125,7 @@ class Client:
         payload = b''
         for pkt in packets:
             offset, msg_type, value = pkt
-            payload += struct.pack('!h', offset)
+            payload += struct.pack('!H', offset)
             if msg_type == MSG_KEYFRAME:
                 payload += struct.pack('!Bh', MSG_KEYFRAME, value)
             elif msg_type == MSG_DATA_DELTA:

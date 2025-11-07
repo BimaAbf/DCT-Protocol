@@ -260,7 +260,7 @@ class Server:
         while offset < payloadLen:
 
             try:
-                entryOffset = struct.unpack('!h', payload[offset:offset + 2])[0]
+                entryOffset = struct.unpack('!H', payload[offset:offset + 2])[0]
                 entryType= struct.unpack('!B', payload[offset + 2:offset + 3])[0]
 
                 if entryType == MSG_KEYFRAME:
