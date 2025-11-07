@@ -3,7 +3,7 @@ colorama>=0.4.6,<0.5
 python-dotenv>=1.0.0,<2.0.0
 numpy>=1.26.0,<2.0.0
 
-# Analysis notebook utilities (required for Analysis/Analysis.py)
+# Analysis notebook utilities
 pandas>=2.1.0,<3.0.0
 matplotlib>=3.8.0,<4.0.0
 
