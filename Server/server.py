@@ -174,7 +174,8 @@ class Server:
         
             if staleProfile and staleProfile['status'] == DeviceStatus.DOWN:
                 console.log.blue(f"[STARTUP] Device at {origin} with MAC {macRepr} previously marked. Re-registering.")
-                self.csvLogger.log_packet(MSG_STARTUP,staleId, 0, time.time(), time.time(), -1 ,False, False,False)
+                staleProfile['current_seq'] += 1
+                self.csvLogger.log_packet(MSG_STARTUP,staleId, staleProfile['current_seq'], time.time(), time.time(), -1 ,False, False,False)
                 try:
                     ackHeader = struct.pack(HEADER_FORMAT,(PROTOCOL_VERSION << 4) | MSG_STARTUP_ACK,staleId, int(False), int(False), 4)
                     ackPayload = struct.pack('!HH', staleId, staleProfile['current_seq'])
@@ -356,6 +357,8 @@ class Server:
         self.running = False
        
         if self.csvLogger:
+            self.csvLogger._rewrite_sheet()
+            console.log.yellow("[Logger] CSV log sorted.")
             self.csvLogger.close()
        
         if self.sock:

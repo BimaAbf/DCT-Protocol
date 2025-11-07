@@ -57,7 +57,7 @@ class Logger:
     def _rewrite_sheet(self) -> None:
         ordered_rows = sorted(
             self.registry,
-            key=lambda entry: (entry['timestamp_s'], entry['arrival_s'], entry['seq'])
+            key=lambda entry: (entry['device_id'], entry['seq'])
         )
 
         self.binder.seek(0)
@@ -80,7 +80,6 @@ class Logger:
             ])
 
         self.binder.flush()
-
     def close(self):
         if self.binder:
             self.binder.close()
