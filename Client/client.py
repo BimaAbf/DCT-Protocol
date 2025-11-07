@@ -181,8 +181,8 @@ class Client:
                     # Send a HEARTBEAT every 5 packets if no delta or keyframe sent
                     else:
                         delta = random.randint(-10, 10)
-                        self.current_value += delta
                         if abs(delta) > self.delta_thresh:
+                            self.current_value += delta
                             self._send_data_delta(delta)
                         else:
                             if time.time() - self.last_sent_time > self.interval * 5:

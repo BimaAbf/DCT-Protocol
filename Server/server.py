@@ -110,7 +110,7 @@ class Server:
             )
 
             version = (verMsgType >> 4) & (0xFF)
-            msgType = (verMsgType & (15) | int(False))
+            msgType = (verMsgType & (0xF))
 
         except struct.error as parseError:
             console.log.red(f"[Packet Error] Could not parse header from {origin}. {parseError}. Discarding.")
@@ -140,9 +140,18 @@ class Server:
         elif msgType == MSG_BATCHED_DATA:
         
             self.BatchTelemetry((deviceId, msgType, seqNum, timestampOffset, payloadLen), bodyBlob, origin, ingressTime )
-       
+        elif msgType == MSG_TIME_SYNC:
+            state = self.unitMap.get(deviceId)
+            try:
+                baseTimeVal = struct.unpack('!I', bodyBlob)[0]
+                state['base_time'] = baseTimeVal
+                console.log.blue(f"[TIME_SYNC] DeviceID {deviceId} set base time to {time.ctime(baseTimeVal)}.")
+                duplicateFlag, gapFlag, delayedFlag = self.classifyPacket(deviceId, seqNum, state)
+                self.csvLogger.log_packet(deviceId, seqNum, baseTimeVal + timestampOffset, ingressTime, duplicateFlag, gapFlag,
+                                          delayedFlag)
+            except struct.error as timeError:
+                console.log.red(f"[Payload Error] Could not parse TIME_SYNC payload from DeviceID {deviceId}. {timeError}")
         else:
-       
             self.trackTelemetry(
                 (deviceId, msgType, seqNum, timestampOffset, payloadLen), bodyBlob, origin, ingressTime )
             
@@ -296,7 +305,6 @@ class Server:
         state = self.unitMap[deviceId]
 
         duplicateFlag, gapFlag, delayedFlag = self.classifyPacket(deviceId, seqNum, state)
-
         baseTime = state['base_time']
         fullTimestamp = baseTime + timestampOffset
 
@@ -324,14 +332,7 @@ class Server:
             state.get('interval_history').append(ingressTime - priorActivity)
 
         try:
-            
-            if msgType == MSG_TIME_SYNC:
-            
-                baseTimeVal = struct.unpack('!I', payload)[0]
-                state['base_time'] = baseTimeVal
-                console.log.blue(f"[TIME_SYNC] DeviceID {deviceId} set base time to {time.ctime(baseTimeVal)}.")
-
-            elif msgType == MSG_KEYFRAME:
+            if msgType == MSG_KEYFRAME:
             
                 for slot in range(0, payloadLen, 2):
                     valueBe = int(struct.unpack('!h', payload[slot:slot + 2])[0])
