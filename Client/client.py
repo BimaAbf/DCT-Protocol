@@ -32,6 +32,7 @@ class Client:
         self.base_time = 0
         self.current_value = 500
         self.running = False
+        self.reconnect_attempts = 3
 
     def _parse_mac(self, mac_str: str) -> bytes:
         try:
@@ -66,7 +67,16 @@ class Client:
            mac_bytes += struct.pack('!B', self.batch_size)
         self._send_packet(MSG_STARTUP, mac_bytes)
         try:
-            data = self.sock.recvfrom(MAX_PACKET_SIZE)[0]
+            for i in range(self.reconnect_attempts):
+                try:
+                    data = self.sock.recvfrom(MAX_PACKET_SIZE)[0]
+                    break
+                except socket.timeout:
+                    console.log.yellow(f"[Warning] No response from server, retrying STARTUP ({i + 1}/{self.reconnect_attempts})...")
+                    self._send_packet(MSG_STARTUP, mac_bytes)
+                    if i == self.reconnect_attempts - 1:
+                        console.log.red("[Error] Maximum STARTUP retries reached. Could not connect to server.")
+                        return False
             header_data = data[:HEADER_SIZE]
             payload_data = data[HEADER_SIZE:]
             (ver_msgtype, deviceid, seq, offset, payload_len) = struct.unpack(HEADER_FORMAT, header_data)
@@ -92,23 +102,19 @@ class Client:
         except (struct.error, IndexError) as exception:
             console.log.red(f"[Error] Failed to parse STARTUP_ACK: {exception}")
             return False
-
     def _send_time_sync(self):
         console.log.text("Sending TIME_SYNC...")
         self.base_time = int(time.time())
         payload = struct.pack('!I', self.base_time)
         self._send_packet(MSG_TIME_SYNC, payload)
-
     def _send_keyframe(self):
         console.log.blue(f"Sending KEYFRAME -> {self.current_value}")
         payload = struct.pack('!h', self.current_value)
         self._send_packet(MSG_KEYFRAME, payload)
-
     def _send_data_delta(self,delta: int):
         console.log.text(f"Sending DATA_DELTA -> {delta: >+3} (New Value: {self.current_value})")
         payload = struct.pack('!b', delta)
         self._send_packet(MSG_DATA_DELTA, payload)
-
     def _send_heartbeat(self):
         console.log.text("Sending HEARTBEAT...")
         self._send_packet(MSG_HEARTBEAT, b'')
@@ -130,7 +136,6 @@ class Client:
     def run(self):
         if not self.connect():
             return
-
         self.running = True
         start_time = time.time()
         next_interval_time = start_time
@@ -156,11 +161,14 @@ class Client:
                         batch_packets.append((offset, MSG_KEYFRAME, self.current_value))
                         batch_value_change_counter = 0
                     else:
-                        delta = random.randint(-10, 10)
-                        self.current_value += delta
+                        delta = random.randint(-10 * self.delta_thresh, 10 * self.delta_thresh)
                         batch_value_change_counter += 1
                         if abs(delta) > self.delta_thresh:
-                            batch_packets.append((offset, MSG_DATA_DELTA, delta))
+                            self.current_value += delta
+                            if delta > 128 or delta < -127:
+                                batch_packets.append((offset, MSG_KEYFRAME, self.current_value))
+                            else:
+                                batch_packets.append((offset, MSG_DATA_DELTA, delta))
                         else:
                             if time.time() - self.last_sent_time > self.interval * 5:
                                 self._send_heartbeat()
@@ -180,14 +188,16 @@ class Client:
                         self._send_keyframe()
                     # Send a HEARTBEAT every 5 packets if no delta or keyframe sent
                     else:
-                        delta = random.randint(-10, 10)
+                        delta = random.randint(-10 * self.delta_thresh, 10* self.delta_thresh)
                         if abs(delta) > self.delta_thresh:
                             self.current_value += delta
-                            self._send_data_delta(delta)
+                            if delta > 128 or delta < -127:
+                                self._send_keyframe()
+                            else:
+                                self._send_data_delta(delta)
                         else:
                             if time.time() - self.last_sent_time > self.interval * 5:
                                 self._send_heartbeat()
-
         except KeyboardInterrupt:
             console.log.yellow("\nClient stopped by user.")
         finally:

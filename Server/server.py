@@ -134,7 +134,8 @@ class Server:
         
             if deviceProfile:
                 deviceProfile['status'] = DeviceStatus.DOWN
-        
+                deviceProfile['last_seen'] = time.time()
+                deviceProfile['current_seq'] += 1
             console.log.blue(f"[SHUTDOWN] Received SHUTDOWN from DeviceID {deviceId} at {origin}. Ignoring.")
         
         elif msgType == MSG_BATCHED_DATA:
@@ -174,8 +175,10 @@ class Server:
         
             if staleProfile and staleProfile['status'] == DeviceStatus.DOWN:
                 console.log.blue(f"[STARTUP] Device at {origin} with MAC {macRepr} previously marked. Re-registering.")
-                staleProfile['current_seq'] += 1
                 self.csvLogger.log_packet(MSG_STARTUP,staleId, staleProfile['current_seq'], time.time(), time.time(), -1 ,False, False,False)
+                if len(payload) >= 7:
+                    staleProfile['batching'] = True
+                    staleProfile['batch_size'] = struct.unpack('!B', payload[6:7])[0]
                 try:
                     ackHeader = struct.pack(HEADER_FORMAT,(PROTOCOL_VERSION << 4) | MSG_STARTUP_ACK,staleId, int(False), int(False), 4)
                     ackPayload = struct.pack('!HH', staleId, staleProfile['current_seq'])
