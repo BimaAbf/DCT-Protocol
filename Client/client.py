@@ -29,6 +29,7 @@ class Client:
         self.device_id = None
         self.last_seq_num = 0
         self.last_sent_time = 0
+        self.last_sent_msg_type = None
         self.base_time = 0
         self.current_value = 500
         self.running = False
@@ -52,6 +53,7 @@ class Client:
     def _send_packet(self, msg_type: int, payload: bytes):
         try:
             self.sock.sendto(self._pack_header(msg_type, len(payload)) + payload, self.server_port)
+            self.last_sent_msg_type = msg_type
             self.last_sent_time = time.time()
             self.last_seq_num = (self.last_seq_num + 1) % 65536
         except socket.error as e:
@@ -139,7 +141,6 @@ class Client:
         self.running = True
         start_time = time.time()
         next_interval_time = start_time
-
         if self.batching:
             batch_packets = deque()
             batch_value_change_counter = 0
@@ -184,7 +185,7 @@ class Client:
                     if self.last_seq_num % 100 == 0 or self.base_time == 0:
                         self._send_time_sync()
                     # Send a KEYFRAME every 10 packets
-                    if self.last_seq_num % 10 == 0:
+                    if self.last_seq_num % 10 == 0 and self.last_sent_msg_type != MSG_KEYFRAME:
                         self._send_keyframe()
                     # Send a HEARTBEAT every 5 packets if no delta or keyframe sent
                     else:
@@ -206,7 +207,6 @@ class Client:
             self.running = False
             self._send_shutdown()
             console.log.yellow("--- Client shutting down ---")
-
     def close(self):
         self.sock.close()
         console.log.text("Socket closed.")
