@@ -1,0 +1,17 @@
+# Core runtime dependencies
+colorama>=0.4.6,<0.5
+python-dotenv>=1.0.0,<2.0.0
+numpy>=1.26.0,<2.0.0
+
+# Analysis notebook utilities (required for Analysis/Analysis.py)
+pandas>=2.1.0,<3.0.0
+matplotlib>=3.8.0,<4.0.0
+
+# --- Setup and execution checklist (instructions) ---
+# 1. Ensure system tools are present: sudo apt install tmux tcpdump python3-pip python3-venv
+# 2. (Optional) Create a virtual environment: python3 -m venv .venv && source .venv/bin/activate
+# 3. Install Python deps: pip install --upgrade pip && pip install -r requirements.txt
+# 4. Populate Server/.env with HOST, PORT, CSV_LOG_DIR, HEADER_FORMAT, MAX_PACKET_SIZE values.
+# 5. Confirm tcpdump can capture on loopback: sudo setcap cap_net_raw,cap_net_admin=eip $(command -v tcpdump) or run tests with sudo.
+# 6. Launch automated test: sudo bash test_script/initialTest.sh
+# 7. Collect results under test_script/Test_<timestamp>/ (client & server logs + lo_capture.pcap).
