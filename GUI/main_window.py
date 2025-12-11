@@ -2,21 +2,18 @@ from __future__ import annotations
 import os
 from PySide6.QtCore import QSize
 from PySide6.QtGui import QGuiApplication, QIcon
-from PySide6.QtWidgets import (QWidget, QHBoxLayout, QVBoxLayout, QMainWindow, QStackedWidget)
-
-from GUI.widgets.sidebar import Sidebar
-
-from GUI.pages.logs_page import LogsPage
-from GUI.pages.console_page import ConsolePage
-from GUI.pages.clients_page import ClientsPage
-from GUI.pages.dashboard_page import DashboardPage
-from GUI.pages.analysis_page import AnalysisPage
-from GUI.pages.client_details_page import ClientDetailsPage
-
-from GUI.controllers.logs_controller import LogsController
-from GUI.controllers.server_controller import ServerController
-from GUI.controllers.clients_controller import ClientsController
-from GUI.controllers.console_controller import ConsoleController
+from PySide6.QtWidgets import QWidget, QHBoxLayout, QVBoxLayout, QMainWindow, QStackedWidget
+from widgets.sidebar import Sidebar
+from pages.logs_page import LogsPage
+from pages.console_page import ConsolePage
+from pages.clients_page import ClientsPage
+from pages.dashboard_page import DashboardPage
+from pages.analysis_page import AnalysisPage
+from pages.client_details_page import ClientDetailsPage
+from controllers.logs_controller import LogsController
+from controllers.server_controller import ServerController
+from controllers.clients_controller import ClientsController
+from controllers.console_controller import ConsoleController
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -28,10 +25,12 @@ class MainWindow(QMainWindow):
         self.resize(1300, 700)
         self.setMinimumSize(QSize(1300, 600))
         
+        ###### remove this section ######################
         screens = QGuiApplication.screens()
         geometry = screens[1].availableGeometry()
         self.move(geometry.x() + (geometry.width() - 1300) // 2, geometry.y() + (geometry.height() - 700) // 2)
-            
+        #################################################
+        
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
         main_layout = QHBoxLayout(central_widget)

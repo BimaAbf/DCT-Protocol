@@ -1,8 +1,8 @@
 from __future__ import annotations
 from typing import Any, Dict
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import ( QFrame, QLabel, QWidget, QGridLayout, QVBoxLayout, QHBoxLayout)
-from GUI.style.utils import apply_shadow
+from PySide6.QtWidgets import QFrame, QLabel, QWidget, QGridLayout, QVBoxLayout, QHBoxLayout
+from style.utils import apply_shadow
 
 class ClientCard(QWidget):
     clicked = Signal(dict)

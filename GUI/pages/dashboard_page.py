@@ -3,8 +3,8 @@ from datetime import datetime
 import pyqtgraph as pg
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QColor
-from PySide6.QtWidgets import (QFrame, QGridLayout, QHBoxLayout, QLabel, QPushButton, QScrollArea, QVBoxLayout, QWidget, QTableWidget, QTableWidgetItem, QHeaderView)
-from GUI.style.utils import apply_shadow
+from PySide6.QtWidgets import QFrame, QGridLayout, QHBoxLayout, QLabel, QPushButton, QScrollArea, QVBoxLayout, QWidget, QTableWidget, QTableWidgetItem, QHeaderView
+from style.utils import apply_shadow
 
 class DashboardPage(QWidget):
     def __init__(self, server_controller, clients_controller, logs_controller=None, parent=None):
@@ -20,9 +20,11 @@ class DashboardPage(QWidget):
         self.last_packets = 0
         
         self.timer = QTimer(self)
+        self.timer.setInterval(1000)
         self.timer.timeout.connect(self._update_graph)
         
         self.uptime_timer = QTimer(self)
+        self.uptime_timer.setInterval(1000)
         self.uptime_timer.timeout.connect(self._update_uptime)
         
         layout = QVBoxLayout(self)
@@ -135,7 +137,6 @@ class DashboardPage(QWidget):
         self.plot_widget.hideButtons()
         self.plot_widget.getPlotItem().getViewBox().setLimits(yMin=0)
         
-        # Add semi-transparent fill
         fill_color = QColor("#3A7FF9")
         fill_color.setAlpha(40)
         

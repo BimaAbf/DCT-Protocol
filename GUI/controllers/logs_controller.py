@@ -1,4 +1,4 @@
-from PySide6.QtCore import QObject, Signal
+from PySide6.QtCore import QObject, Signal, QTimer
 import os
 import csv
 from datetime import datetime
@@ -11,13 +11,37 @@ class LogsController(QObject):
     def __init__(self, logs_dir=None):
         super().__init__()
         base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-        self.logs_dir = logs_dir or os.path.join(base_dir, "Server", "logs")
-        if not os.path.exists(self.logs_dir):
-            self.logs_dir = os.path.join(base_dir, "logs")
+        
+        # Read CSV_LOG_DIR from .env file
+        if logs_dir is None:
+            env_path = os.path.join(base_dir, ".env")
+            csv_log_dir = "./logs"  # default
+            if os.path.exists(env_path):
+                try:
+                    with open(env_path) as f:
+                        for line in f:
+                            if '=' in line and not line.strip().startswith('#'):
+                                key, value = line.strip().split('=', 1)
+                                if key.strip() == 'CSV_LOG_DIR':
+                                    csv_log_dir = value.strip().strip('"').strip("'")
+                                    break
+                except Exception:
+                    pass
+            # Resolve relative path from project root
+            if csv_log_dir.startswith("./"):
+                csv_log_dir = csv_log_dir[2:]
+            self.logs_dir = os.path.join(base_dir, csv_log_dir)
+        else:
+            self.logs_dir = logs_dir
         
         self.latest_log = None
         self.stats = {"pps": 0.0, "last": None}
         self.metrics = {}
+        
+        self.auto_refresh_timer = QTimer(self)
+        self.auto_refresh_timer.timeout.connect(self.refresh_logs)
+        self.auto_refresh_timer.start(2000) 
+        
         self.refresh_logs()
 
     def refresh_logs(self):
@@ -44,12 +68,9 @@ class LogsController(QObject):
                 return [[line.strip()] for line in f]
 
     def _parse_datetime(self, value):
-        if not value:
+        if not value or value == '-':
             return None
         value = value.replace('Z', '+00:00')
-        if '.' in value and len(value.split('.')[1]) == 3:
-            value += "000"
-        
         for fmt in ("%Y-%m-%d %H:%M:%S.%f", "%Y-%m-%d %H:%M:%S"):
             try:
                 return datetime.strptime(value, fmt)
@@ -91,7 +112,8 @@ class LogsController(QObject):
                     
                     if arrival_time and timestamp:
                         latency = (arrival_time - timestamp).total_seconds() * 1000
-                        device_data["lats"].append(latency)
+                        if 0 <= latency < 60000: 
+                            device_data["lats"].append(latency)
                     
                     if row.get("packet_size"):
                         device_data["sizes"].append(float(row["packet_size"]))
@@ -140,6 +162,11 @@ class LogsController(QObject):
                             timestamp = self._parse_datetime(row.get("timestamp"))
                             arrival_time = self._parse_datetime(row.get("arrival_time"))
                             
+                            latency = 0.0
+                            if timestamp and arrival_time:
+                                lat = (arrival_time - timestamp).total_seconds() * 1000
+                                latency = lat if 0 <= lat < 60000 else 0.0
+                            
                             logs.append({
                                 "seq": row.get("seq"),
                                 "timestamp": row.get("timestamp"),
@@ -149,7 +176,7 @@ class LogsController(QObject):
                                 "arrival_time": row.get("arrival_time"),
                                 "duplicate": row.get("duplicate_flag") == "1",
                                 "gap": row.get("gap_flag") == "1",
-                                "latency": (arrival_time - timestamp).total_seconds() * 1000 if timestamp and arrival_time else 0.0
+                                "latency": latency
                             })
             except Exception:
                 pass

@@ -1,24 +1,33 @@
 from __future__ import annotations
-import os, re
+import os
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QTextCursor
-from PySide6.QtWidgets import (QFrame, QLabel, QWidget, QHBoxLayout, QVBoxLayout, QTextEdit)
-from GUI.style.utils import apply_shadow
+from PySide6.QtWidgets import QFrame, QLabel, QWidget, QHBoxLayout, QVBoxLayout, QTextEdit
+from style.utils import apply_shadow
 
 class ConsoleWidget(QTextEdit):
     command_entered = Signal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setPlaceholderText("Console output...")
+        self.setPlaceholderText("PowerShell Console...")
         self.setMinimumHeight(320)
-        self.prompt = "> "
+        self.prompt = ""
         self.history = []
         self.history_index = 0
-        self.insertPlainText(self.prompt)
         self.last_position = self.textCursor().position()
 
+        self.tab_matches = []
+        self.tab_index = 0
+        self.tab_prefix = ""
+        self.tab_start_pos = 0
+
     def keyPressEvent(self, event):
+        if event.modifiers() == Qt.ControlModifier:
+            if event.key() in (Qt.Key_C, Qt.Key_V, Qt.Key_A, Qt.Key_X):
+                super().keyPressEvent(event)
+                return
+        
         cursor = self.textCursor()
         if cursor.position() < self.last_position and event.key() not in (Qt.Key_Left, Qt.Key_Right, Qt.Key_Up, Qt.Key_Down, Qt.Key_Control, Qt.Key_Shift, Qt.Key_Tab):
             cursor.movePosition(QTextCursor.End)
@@ -37,46 +46,105 @@ class ConsoleWidget(QTextEdit):
         elif event.key() == Qt.Key_Backspace and cursor.position() <= self.last_position:
             return
         else:
+            self.tab_matches = []
+            self.tab_index = 0
             super().keyPressEvent(event)
 
     def _handle_tab(self):
-        text = self.toPlainText()[self.last_position:]
-        cursor_pos = self.textCursor().position() - self.last_position
+        full_text = self.toPlainText()
+        cursor_pos = self.textCursor().position()
         
-        if cursor_pos < 0:
+        if cursor_pos < self.last_position:
             return
-            
-        parts = re.split(r'\s+', text[:cursor_pos]) or ['']
-        prefix = parts[-1]
         
-        if not prefix:
-            return
-            
-        candidates = ["help", "clear", "cls", "python", "Client/client.py", "Server/server.py", "Analysis/Analysis.py", "dir", "ls", "cd", "exit"]
+        before_cursor = full_text[self.last_position:cursor_pos]
+        
+        if self.tab_matches:
+            current_text = full_text[self.tab_start_pos:cursor_pos]
+            if current_text in self.tab_matches:
+                self.tab_index = (self.tab_index + 1) % len(self.tab_matches)
+                self._apply_completion()
+                return
+        
+        prefix = ""
+        prefix_start_in_cmd = 0 
+        
+        if '"' in before_cursor:
+            quote_count = before_cursor.count('"')
+            if quote_count % 2 == 1: 
+                last_quote = before_cursor.rfind('"')
+                prefix = before_cursor[last_quote + 1:]
+                prefix_start_in_cmd = last_quote + 1
+            else:
+                after_quote = before_cursor[before_cursor.rfind('"') + 1:]
+                parts = after_quote.split()
+                prefix = parts[-1] if parts else ""
+                prefix_start_in_cmd = len(before_cursor) - len(prefix)
+        else:
+            parts = before_cursor.split()
+            prefix = parts[-1] if parts else ""
+            prefix_start_in_cmd = len(before_cursor) - len(prefix)
+        
+        matches = []
+        search_dir = "."
+        search_prefix = prefix.strip('"')
+        
+        if "/" in search_prefix or "\\" in search_prefix:
+            search_dir = os.path.dirname(search_prefix) or "."
+            search_prefix = os.path.basename(search_prefix)
+        
         try:
-            directory = os.path.dirname(prefix) or "."
-            if os.path.isdir(directory):
-                candidates.extend([(os.path.join(directory, f) if directory != "." else f).replace(os.sep, "/") for f in os.listdir(directory)])
+            if os.path.isdir(search_dir):
+                for item in sorted(os.listdir(search_dir)):
+                    if item.lower().startswith(search_prefix.lower()):
+                        path = os.path.join(search_dir, item) if search_dir != "." else item
+                        path = path.replace("\\", "/")
+                        if os.path.isdir(path):
+                            path += "/"
+                        if " " in path:
+                            path = f'"{path}"'
+                        matches.append(path)
         except:
             pass
-            
-        matches = [x for x in candidates if x.startswith(prefix)]
-        if matches:
-            completion = matches[0] if len(matches) == 1 else os.path.commonprefix(matches)
-            if len(completion) > len(prefix):
-                self.insertPlainText(completion[len(prefix):])
+        
+        parts = before_cursor.split()
+        if len(parts) <= 1 and prefix:
+            cmds = ["help", "clear", "cls", "cd", "dir", "ls", "python", "pip", "git", "exit"]
+            for c in cmds:
+                if c.startswith(prefix.lower()) and c not in matches:
+                    matches.append(c)
+        
+        if not matches:
+            return
+        
+        self.tab_matches = matches
+        self.tab_index = 0
+        self.tab_prefix = prefix
+        self.tab_start_pos = self.last_position + prefix_start_in_cmd
+        
+        self._apply_completion()
+    
+    def _apply_completion(self):
+        if not self.tab_matches:
+            return
+        cursor = self.textCursor()
+        current_pos = cursor.position()
+        cursor.setPosition(self.tab_start_pos)
+        cursor.setPosition(current_pos, QTextCursor.KeepAnchor)
+        cursor.removeSelectedText()
+        cursor.insertText(self.tab_matches[self.tab_index])
+        self.setTextCursor(cursor)
 
     def _handle_enter(self):
         command = self.toPlainText()[self.last_position:].strip()
         self.moveCursor(QTextCursor.End)
         self.insertPlainText("\n")
+        self.last_position = self.textCursor().position()
         
         if command:
             self.history.append(command)
             self.history_index = len(self.history)
             self.command_entered.emit(command)
-        else:
-            self.show_prompt()
 
     def _navigate_history(self, direction):
         if not self.history:
@@ -142,9 +210,28 @@ class ConsolePage(QWidget):
     def _run_command(self, command):
         if command.lower() in {"clear", "cls"}:
             self.console_widget.clear()
-            self.console_widget.show_prompt()
+            self.console_widget.last_position = 0
+            self.console_controller.run_command("cls")
         elif command.lower() == "help":
-            self.console_widget.append_output("Available Commands:\n  python Client/client.py [args]\n  python Server/server.py [args]\n  python Analysis/Analysis.py\n  clear / cls\n  help\n\nStandard shell commands supported.\n")
-            self.console_widget.show_prompt()
+            help_text = """DCT Protocol Console - Quick Reference
+    ======================================
+    Server:
+    python Server/main.py          Start the server
+
+    Client:
+    python Client/main.py <host> --port <port> --mac <mac> --interval <sec> --duration <sec>
+    Example: python Client/main.py 127.0.0.1 --port 5000 --mac AA:BB:CC:DD:EE:FF --interval 1 --duration 60
+
+    Analysis:
+    python Analysis/Analysis.py    Run analysis on logs
+
+    Console:
+    clear / cls                    Clear the console
+    help                           Show this help
+
+    PowerShell commands also work (dir, cd, etc.)
+    """
+            self.console_widget.append_output(help_text)
+            self.console_controller.run_command("echo $null")
         else:
             self.console_controller.run_command(command)

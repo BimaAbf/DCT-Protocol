@@ -1,5 +1,4 @@
-from PySide6.QtCore import QObject, Signal, QProcess
-import random
+from PySide6.QtCore import QObject, Signal, QProcess, QProcessEnvironment
 import datetime
 import os
 import sys
@@ -14,9 +13,9 @@ class ClientsController(QObject):
         self.logs_controller = logs_controller
         self.processes = []
         
-        base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-        self.script_path = os.path.join(base_dir, "Client", "main.py")
-        self.working_dir = base_dir
+        self.base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        self.script_path = os.path.join(self.base_dir, "Client", "main.py")
+        self.working_dir = self.base_dir
         
         if self.logs_controller:
             self.logs_controller.logsUpdated.connect(self.refresh)
@@ -38,7 +37,7 @@ class ClientsController(QObject):
             
             self.clients.append({
                 "device_id": device_id,
-                "packets_sent": metrics.get("packets", random.randint(5, 50)),
+                "packets_sent": metrics.get("packets", 0),
                 "duplicates": metrics.get("duplicates", 0),
                 "gaps": metrics.get("gaps", 0),
                 "avg_latency": metrics.get("avg_latency"),
@@ -70,6 +69,15 @@ class ClientsController(QObject):
         process.setProgram(sys.executable)
         process.setArguments(args)
         process.setWorkingDirectory(self.working_dir)
+        
+        env = QProcessEnvironment.systemEnvironment()
+        current_path = env.value("PYTHONPATH", "")
+        if current_path:
+            env.insert("PYTHONPATH", f"{self.base_dir};{current_path}")
+        else:
+            env.insert("PYTHONPATH", self.base_dir)
+        process.setProcessEnvironment(env)
+        
         process.finished.connect(lambda: self._cleanup_process(process))
         process.start()
         self.processes.append(process)

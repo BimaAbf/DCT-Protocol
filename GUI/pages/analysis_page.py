@@ -1,11 +1,11 @@
 from __future__ import annotations
+import os
 import pandas as pd
 import numpy as np
 import pyqtgraph as pg
-import os
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QComboBox, QPushButton, QFrame, QScrollArea, QTableWidget, QTableWidgetItem, QHeaderView, QGridLayout)
-from GUI.style.utils import apply_shadow
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QComboBox, QPushButton, QFrame, QScrollArea, QTableWidget, QTableWidgetItem, QHeaderView, QGridLayout
+from style.utils import apply_shadow
 
 MESSAGE_TYPES = {1: "Startup", 2: "Startup Ack", 3: "Time Sync", 4: "Keyframe", 5: "Delta", 6: "Heartbeat", 7: "Batch", 11: "Shutdown"}
 
@@ -54,6 +54,11 @@ class AnalysisPage(QWidget):
         self.logs_controller.logsUpdated.connect(self._update_log_files)
         self._update_log_files(self.logs_controller.refresh_logs())
 
+    def showEvent(self, event):
+        """Refresh logs when page becomes visible"""
+        super().showEvent(event)
+        self.logs_controller.refresh_logs()
+
     def _update_log_files(self, files):
         current_text = self.log_selector.currentText()
         self.log_selector.clear()
@@ -62,6 +67,8 @@ class AnalysisPage(QWidget):
             self.log_selector.setCurrentText(current_text)
 
     def _analyze_log(self):
+        self.logs_controller.refresh_logs()
+        
         filename = self.log_selector.currentText()
         if not filename:
             return

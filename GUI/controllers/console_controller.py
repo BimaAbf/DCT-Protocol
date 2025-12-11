@@ -1,6 +1,5 @@
 from PySide6.QtCore import QObject, Signal, QProcess
-import platform
-import shutil
+import platform, shutil, os
 
 class ConsoleController(QObject):
     outputReceived = Signal(str)
@@ -14,19 +13,29 @@ class ConsoleController(QObject):
         self.process.readyReadStandardOutput.connect(self._read_output)
         self.process.finished.connect(lambda code, _: self.finished.emit(code))
         self.process.errorOccurred.connect(lambda error: self.outputReceived.emit(f"\n[Error] {error}\n"))
-        self.sentinel = "__DCT_DONE__"
+        
+        self.base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        self.process.setWorkingDirectory(self.base_dir)
+        self.last_command = None
+        
         self._start_shell()
 
     def _start_shell(self):
         if platform.system() == "Windows":
-            self.process.start(shutil.which("powershell") or "powershell.exe", ["-NoLogo"])
-            if self.process.waitForStarted(1000):
-                self.process.write(b"$OutputEncoding = [System.Console]::OutputEncoding = [System.Text.Encoding]::UTF8\n")
+            powershell = shutil.which("powershell") or "powershell.exe"
+            self.process.start(powershell, [
+                "-NoLogo",
+                "-NoExit", 
+                "-ExecutionPolicy", "Bypass",
+                "-Command", f"cd '{self.base_dir}'; $OutputEncoding = [System.Text.Encoding]::UTF8; Clear-Host"
+            ])
         else:
             self.process.start(shutil.which("bash") or "/bin/sh", ["-i"])
+            if self.process.waitForStarted(2000):
+                self.process.write(f"cd '{self.base_dir}' && clear\n".encode('utf-8'))
         
-        if not self.process.waitForStarted(2000):
-            self.outputReceived.emit("\n[Error] Shell failed.\n")
+        if not self.process.waitForStarted(3000):
+            self.outputReceived.emit("\n[Error] Shell failed to start.\n")
 
     def run_command(self, command):
         if not command:
@@ -34,21 +43,18 @@ class ConsoleController(QObject):
         
         if self.process.state() == QProcess.NotRunning:
             self._start_shell()
-            
-        echo_cmd = f"; Write-Output '{self.sentinel}'\n" if platform.system() == "Windows" else f"; echo '{self.sentinel}'\n"
-        self.process.write((command + echo_cmd).encode('utf-8'))
+        
+        self.last_command = command
+        self.process.write((command + "\n").encode('utf-8'))
 
     def _read_output(self):
         text = self.process.readAllStandardOutput().data().decode('utf-8', errors='replace')
-        if self.sentinel in text:
-            parts = text.split(self.sentinel)
-            for i, part in enumerate(parts):
-                if part.strip():
-                    self.outputReceived.emit(part.strip())
-                if i < len(parts) - 1:
-                    self.commandFinished.emit()
-        else:
-            self.outputReceived.emit(text)
+        if text:
+            if self.last_command and text.strip().startswith(self.last_command):
+                text = text.replace(self.last_command, '', 1).lstrip('\r\n')
+                self.last_command = None
+            if text:
+                self.outputReceived.emit(text)
 
     def cleanup(self):
         if self.process.state() != QProcess.NotRunning:

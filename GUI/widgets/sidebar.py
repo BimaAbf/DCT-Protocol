@@ -1,8 +1,8 @@
 import os
 from PySide6.QtCore import Qt, Signal, QSize
 from PySide6.QtGui import QIcon, QPixmap
-from PySide6.QtWidgets import (QHBoxLayout, QVBoxLayout, QFrame, QLabel, QPushButton)
-from GUI.style.utils import apply_shadow
+from PySide6.QtWidgets import QHBoxLayout, QVBoxLayout, QFrame, QLabel, QPushButton
+from style.utils import apply_shadow
 
 class Sidebar(QFrame):
     pageRequested = Signal(int)

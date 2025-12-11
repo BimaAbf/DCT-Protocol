@@ -2,20 +2,18 @@ from __future__ import annotations
 import os, sys
 from PySide6.QtWidgets import QApplication
 from PySide6.QtCore import QFileSystemWatcher
-from GUI.main_window import MainWindow
+from main_window import MainWindow
 
-def main():
+if __name__ == "__main__":
     app = QApplication(sys.argv)
-    style_path = "./style/style.qss"
+    
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    style_path = os.path.join(base_dir, "style", "style.qss")
     
     def update_style(path):
-        if os.path.exists(path):
-            try:
-                with open(path) as f:
-                    app.setStyleSheet(f.read())
-            except:
-                pass
-                
+        with open(path) as f:
+            app.setStyleSheet(f.read())
+
     update_style(style_path)
     watcher = QFileSystemWatcher([style_path])
     watcher.fileChanged.connect(lambda _: update_style(style_path))
@@ -23,6 +21,3 @@ def main():
     window = MainWindow()
     window.show()
     sys.exit(app.exec())
-
-if __name__ == "__main__":
-    main()

@@ -1,7 +1,29 @@
 from __future__ import annotations
+import os
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import (QDialog, QFrame, QHBoxLayout, QVBoxLayout, QLabel, QLineEdit, QPushButton, QSizePolicy, QComboBox)
-from GUI.style.utils import apply_shadow
+from PySide6.QtWidgets import QDialog, QFrame, QHBoxLayout, QVBoxLayout, QLabel, QLineEdit, QPushButton, QSizePolicy, QComboBox
+from style.utils import apply_shadow
+
+def _read_env_defaults():
+    """Read HOST and PORT from .env file"""
+    base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    env_path = os.path.join(base_dir, ".env")
+    host, port = "127.0.0.1", "5000"
+    if os.path.exists(env_path):
+        try:
+            with open(env_path) as f:
+                for line in f:
+                    if '=' in line and not line.strip().startswith('#'):
+                        key, value = line.strip().split('=', 1)
+                        key, value = key.strip(), value.strip()
+                        if key == 'HOST':
+                            # For client, use localhost if server binds to 0.0.0.0
+                            host = "127.0.0.1" if value == "0.0.0.0" else value
+                        elif key == 'PORT':
+                            port = value
+        except Exception:
+            pass
+    return host, port
 
 class ClientFormDialog(QDialog):
     def __init__(self, parent=None):
@@ -25,12 +47,15 @@ class ClientFormDialog(QDialog):
         header.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         form_layout.addWidget(header)
         
+        # Read defaults from .env
+        default_host, default_port = _read_env_defaults()
+        
         self.inputs = {}
         fields = [
-            ("ip", "IP Address :", "127.0.0.1"),
+            ("ip", "IP Address :", default_host),
             ("interval", "Interval :", "1.0"),
-            ("port", "Port :", "5000"),
-            ("batching", "Batching :", ["Enabled", "Disabled"]),
+            ("port", "Port :", default_port),
+            ("batching", "Batching :", ["Disabled", "Enabled"]),
             ("mac", "MAC Address :", "00:00:00:00:00:00"),
             ("delta", "Delta Thresh :", "1"),
             ("duration", "Duration :", "100"),

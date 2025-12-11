@@ -1,7 +1,7 @@
 from __future__ import annotations
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtWidgets import (QFrame, QWidget, QLabel, QTableWidget, QTableWidgetItem, QHBoxLayout, QVBoxLayout, QListWidget, QListWidgetItem, QScrollArea)
-from GUI.style.utils import apply_shadow
+from PySide6.QtWidgets import QFrame, QWidget, QLabel, QTableWidget, QTableWidgetItem, QHBoxLayout, QVBoxLayout, QListWidget, QListWidgetItem, QScrollArea
+from style.utils import apply_shadow
 
 class LogsPage(QWidget):
     def __init__(self, logs_controller, parent=None):
@@ -74,6 +74,10 @@ class LogsPage(QWidget):
         self.refresh_timer.setInterval(30000)
         self.refresh_timer.timeout.connect(self.logs_controller.refresh_logs)
         self.refresh_timer.start()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self.logs_controller.refresh_logs()
 
     def _update_logs_list(self, files):
         self.logs_list.clear()

@@ -269,7 +269,7 @@ class Server:
 
                     value = struct.unpack('!h', payload[offset + 3:offset + 5])[0]
                     entryPayload = struct.pack('!h', value)
-                    entryMeta = (deviceId, entryType, seqNum, timestampOffset + entryOffset, payloadLen)
+                    entryMeta = (deviceId, entryType, seqNum, entryOffset, payloadLen)
 
                     self.trackTelemetry(entryMeta, entryPayload, origin, ingressTime, cpu_start)
                     offset += 5
@@ -279,7 +279,7 @@ class Server:
 
                     value = struct.unpack('!b', payload[offset + 3:offset + 4])[0]
                     entryPayload = struct.pack('!b', value)
-                    entryMeta = (deviceId, entryType, seqNum, timestampOffset + entryOffset,payloadLen)
+                    entryMeta = (deviceId, entryType, seqNum, entryOffset, payloadLen)
 
                     self.trackTelemetry(entryMeta, entryPayload, origin, ingressTime, cpu_start)
                     offset += 4

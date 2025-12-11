@@ -1,9 +1,9 @@
 from __future__ import annotations
-import pyqtgraph as pg
 import datetime
+import pyqtgraph as pg
 from PySide6.QtCore import Qt, Signal, QTimer
-from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFrame, QGridLayout, QScrollArea, QTableWidget, QTableWidgetItem, QHeaderView)
-from GUI.style.utils import apply_shadow
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFrame, QGridLayout, QScrollArea, QTableWidget, QTableWidgetItem, QHeaderView
+from style.utils import apply_shadow
 
 class ClientDetailsPage(QWidget):
     backRequested = Signal()

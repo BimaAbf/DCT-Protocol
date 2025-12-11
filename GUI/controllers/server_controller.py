@@ -1,4 +1,4 @@
-from PySide6.QtCore import QObject, Signal, QProcess
+from PySide6.QtCore import QObject, Signal, QProcess, QProcessEnvironment
 import os
 import sys
 
@@ -6,7 +6,7 @@ class ServerController(QObject):
     statusChanged = Signal(bool, str)
     outputReceived = Signal(str)
 
-    def __init__(self, ip="127.0.0.1", port=8080):
+    def __init__(self, ip="127.0.0.1", port=5000):
         super().__init__()
         self.ip = ip
         self.port = port
@@ -14,11 +14,11 @@ class ServerController(QObject):
         self.devices = 0
         self.process = None
         
-        base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-        self.script_path = os.path.join(base_dir, "Server", "main.py")
-        self.working_dir = os.path.join(base_dir, "Server")
+        self.base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        self.script_path = os.path.join(self.base_dir, "Server", "main.py")
+        self.working_dir = self.base_dir 
         
-        env_path = os.path.join(base_dir, ".env")
+        env_path = os.path.join(self.base_dir, ".env")
         if os.path.exists(env_path):
             try:
                 with open(env_path) as f:
@@ -44,6 +44,14 @@ class ServerController(QObject):
         self.process.setArguments([self.script_path])
         self.process.setWorkingDirectory(self.working_dir)
         
+        env = QProcessEnvironment.systemEnvironment()
+        current_path = env.value("PYTHONPATH", "")
+        if current_path:
+            env.insert("PYTHONPATH", f"{self.base_dir};{current_path}")
+        else:
+            env.insert("PYTHONPATH", self.base_dir)
+        self.process.setProcessEnvironment(env)
+        
         self.process.started.connect(lambda: self._update_status(True, "Server running"))
         self.process.finished.connect(lambda code, _: self._update_status(False, f"Stopped (Code: {code})"))
         self.process.readyReadStandardOutput.connect(lambda: self._read_output(self.process.readAllStandardOutput))
@@ -52,10 +60,10 @@ class ServerController(QObject):
         self.process.start()
 
     def stop(self):
-        if self.running and self.process:
-            self.process.terminate()
-            if not self.process.waitForFinished(2000):
-                self.process.kill()
+        if self.process and self.process.state() != QProcess.NotRunning:
+            self.process.kill()
+            self.process.waitForFinished(3000)
+            self._update_status(False, "Stopped")
 
     def _update_status(self, running, message):
         self.running = running
