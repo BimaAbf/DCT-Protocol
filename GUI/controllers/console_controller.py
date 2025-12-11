@@ -11,14 +11,23 @@ class ConsoleController(QObject):
         self.process = QProcess(self)
         self.process.setProcessChannelMode(QProcess.MergedChannels)
         self.process.readyReadStandardOutput.connect(self._read_output)
-        self.process.finished.connect(lambda code, _: self.finished.emit(code))
-        self.process.errorOccurred.connect(lambda error: self.outputReceived.emit(f"\n[Error] {error}\n"))
+        self.process.finished.connect(self._on_finished)
+        self.process.errorOccurred.connect(self._on_error)
         
         self.base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         self.process.setWorkingDirectory(self.base_dir)
         self.last_command = None
+        self._restarting = False
         
         self._start_shell()
+
+    def _on_finished(self, code, status):
+        if not self._restarting:
+            self.finished.emit(code)
+
+    def _on_error(self, error):
+        if not self._restarting:
+            self.outputReceived.emit(f"\n[Error] {error}\n")
 
     def _start_shell(self):
         if platform.system() == "Windows":
@@ -55,6 +64,15 @@ class ConsoleController(QObject):
                 self.last_command = None
             if text:
                 self.outputReceived.emit(text)
+
+    def restart_shell(self):
+        """Kill current process and restart shell"""
+        self._restarting = True
+        if self.process.state() != QProcess.NotRunning:
+            self.process.kill()
+            self.process.waitForFinished(1000)
+        self._restarting = False
+        self._start_shell()
 
     def cleanup(self):
         if self.process.state() != QProcess.NotRunning:

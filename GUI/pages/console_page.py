@@ -1,8 +1,9 @@
 from __future__ import annotations
 import os
+import subprocess
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QTextCursor
-from PySide6.QtWidgets import QFrame, QLabel, QWidget, QHBoxLayout, QVBoxLayout, QTextEdit
+from PySide6.QtWidgets import QFrame, QLabel, QWidget, QHBoxLayout, QVBoxLayout, QTextEdit, QPushButton
 from style.utils import apply_shadow
 
 class ConsoleWidget(QTextEdit):
@@ -186,6 +187,25 @@ class ConsolePage(QWidget):
         header_layout.addWidget(QLabel("Console", objectName="ConsoleTitle"))
         header_layout.addStretch(1)
         header_layout.addWidget(QLabel("Type 'help' for commands", objectName="ConsoleHelpHint"))
+        
+        # Button to open external terminal
+        self.terminal_btn = QPushButton("Open Terminal")
+        self.terminal_btn.setFixedSize(120, 32)
+        self.terminal_btn.clicked.connect(self._open_terminal)
+        header_layout.addWidget(self.terminal_btn)
+        
+        # Button to open WSL with tmux
+        self.tmux_btn = QPushButton("Open tmux")
+        self.tmux_btn.setFixedSize(100, 32)
+        self.tmux_btn.clicked.connect(self._open_tmux)
+        header_layout.addWidget(self.tmux_btn)
+        
+        # Button to restart terminal
+        self.kill_btn = QPushButton("Restart")
+        self.kill_btn.setFixedSize(80, 32)
+        self.kill_btn.clicked.connect(self._restart_terminal)
+        header_layout.addWidget(self.kill_btn)
+        
         layout.addLayout(header_layout)
         
         container = QFrame(objectName="ConsoleContainer")
@@ -207,6 +227,41 @@ class ConsolePage(QWidget):
         self.console_controller.finished.connect(lambda x: self.console_widget.append_output(f"[Process exited {x}]"))
         self.console_widget.setFocus()
 
+    def _open_terminal(self):
+        """Open external terminal in project directory"""
+        base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        
+        try:
+            # Try Windows Terminal first
+            subprocess.Popen(["wt", "-d", base_dir])
+        except FileNotFoundError:
+            try:
+                # Fallback: open PowerShell directly
+                subprocess.Popen(["powershell", "-NoExit", "-Command", f"cd '{base_dir}'"])
+            except Exception as e:
+                self.console_widget.append_output(f"\n[Error] Could not open terminal: {e}\n")
+
+    def _open_tmux(self):
+        """Open WSL with tmux in project directory"""
+        base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        drive = base_dir[0].lower()
+        wsl_path = f"/mnt/{drive}" + base_dir[2:].replace("\\", "/")
+        
+        try:
+            # Open Windows Terminal with WSL, cd to project, start tmux
+            subprocess.Popen(["wt", "wsl", "--cd", wsl_path, "-e", "bash", "-c", "tmux new -A -s dct"])
+        except FileNotFoundError:
+            try:
+                subprocess.Popen(["wsl", "--cd", wsl_path, "-e", "bash", "-c", "tmux new -A -s dct"])
+            except Exception as e:
+                self.console_widget.append_output(f"\n[Error] Could not open tmux: {e}\n")
+
+    def _restart_terminal(self):
+        """Restart the terminal"""
+        self.console_widget.clear()
+        self.console_widget.last_position = 0
+        self.console_controller.restart_shell()
+
     def _run_command(self, command):
         if command.lower() in {"clear", "cls"}:
             self.console_widget.clear()
@@ -214,23 +269,23 @@ class ConsolePage(QWidget):
             self.console_controller.run_command("cls")
         elif command.lower() == "help":
             help_text = """DCT Protocol Console - Quick Reference
-    ======================================
-    Server:
-    python Server/main.py          Start the server
+======================================
+Server:
+  python Server/main.py          Start the server
 
-    Client:
-    python Client/main.py <host> --port <port> --mac <mac> --interval <sec> --duration <sec>
-    Example: python Client/main.py 127.0.0.1 --port 5000 --mac AA:BB:CC:DD:EE:FF --interval 1 --duration 60
+Client:
+  python Client/main.py <host> --port <port> --mac <mac> --interval <sec> --duration <sec>
+  Example: python Client/main.py 127.0.0.1 --port 5000 --mac AA:BB:CC:DD:EE:FF --interval 1 --duration 60
 
-    Analysis:
-    python Analysis/Analysis.py    Run analysis on logs
+Analysis:
+  python Analysis/Analysis.py    Run analysis on logs
 
-    Console:
-    clear / cls                    Clear the console
-    help                           Show this help
+Console:
+  clear / cls                    Clear the console
+  help                           Show this help
 
-    PowerShell commands also work (dir, cd, etc.)
-    """
+PowerShell commands also work (dir, cd, etc.)
+"""
             self.console_widget.append_output(help_text)
             self.console_controller.run_command("echo $null")
         else:
