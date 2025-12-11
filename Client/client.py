@@ -55,7 +55,8 @@ class Client:
             self.sock.sendto(self._pack_header(msg_type, len(payload)) + payload, self.server_port)
             self.last_sent_msg_type = msg_type
             self.last_sent_time = time.time()
-            self.last_seq_num = (self.last_seq_num + 1) % 65536
+            if not self.batching or msg_type != MSG_HEARTBEAT:
+                self.last_seq_num = (self.last_seq_num + 1) % 65536
         except socket.error as e:
             console.log.red(f"[Socket Error] Could not send packet: {e}")
             self.running = False
@@ -170,9 +171,8 @@ class Client:
                                 batch_packets.append((offset, MSG_KEYFRAME, self.current_value))
                             else:
                                 batch_packets.append((offset, MSG_DATA_DELTA, delta))
-                        else:
-                            if time.time() - self.last_sent_time > self.interval * 5:
-                                self._send_heartbeat()
+                        if time.time() - self.last_sent_time > self.interval * 5:
+                            self._send_heartbeat()
                     if len(batch_packets) == self.batch_size:
                         self._send_batch(batch_packets)
                         batch_packets.clear()
@@ -197,8 +197,7 @@ class Client:
                             else:
                                 self._send_data_delta(delta)
                         else:
-                            if time.time() - self.last_sent_time > self.interval * 5:
-                                self._send_heartbeat()
+                            self._send_heartbeat()
         except KeyboardInterrupt:
             console.log.yellow("\nClient stopped by user.")
         finally:

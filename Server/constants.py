@@ -8,6 +8,8 @@ import struct
 import os
 import sys
 from dotenv import load_dotenv
+
+
 if not load_dotenv():
     print("[FATAL] .env file not found.")
     sys.exit(1)
