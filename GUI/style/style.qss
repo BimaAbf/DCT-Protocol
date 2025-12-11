@@ -1,0 +1,286 @@
+/*Global Styles*/
+QWidget {
+    background-color: #F5F7FA;
+    color: #2C3E50;
+    font-family: "Segoe UI", "Roboto", "Helvetica Neue", "Arial", sans-serif;
+    font-size: 10pt;
+}
+QMainWindow, #MainContent {
+    background-color: #F5F7FA;
+}
+QLabel {
+    background-color: transparent;
+}
+
+/*Sidebar*/
+#SidebarPanel {
+    background-color: #FFFFFF;
+    border-radius: 18px;
+    border: 1px solid #ECF0F1;
+    padding: 18px 12px;
+}
+#SidebarLogo {
+    background-color: transparent;
+}
+QLabel#SidebarTitle {
+    background-color: transparent;
+    font-size: 18pt;
+    font-weight: 600;
+    color: #1E293B;
+}
+QPushButton#SidebarButton {
+    background-color: transparent;
+    border: none;
+    padding: 12px 18px;
+    text-align: left;
+    font-size: 11pt;
+    color: #6B7A90;
+    border-radius: 10px;
+}
+QPushButton#SidebarButton:hover {
+    background-color: #EEF6FF;
+    color: #1E88E5;
+}
+QPushButton#SidebarButton:checked {
+    background-color: #DCEBFF;
+    color: #1E3A8A;
+    font-weight: 600;
+}
+
+/*Cards & Containers*/
+.page-card, .panel-card, QFrame[class="card"], QFrame[class="metric-card"], QFrame[class="dialog-card"] {
+    background-color: #FFFFFF;
+    border: 1px solid #ECF0F1;
+    border-radius: 18px;
+    color: #2C3E50;
+}
+.page-card {
+    padding: 10px;
+}
+QFrame[class="metric-card"] {
+    min-height: 80px;
+    padding: 10px;
+}
+QFrame[class="client-card"] {
+    background-color: #FFFFFF;
+    border-radius: 12px;
+    border: 1px solid #F1F5F9;
+    margin-bottom: 16px;
+}
+QFrame[class="client-card"]:hover {
+    border: 1px solid #E2E8F0;
+}
+
+/*Headers & Labels*/
+QLabel#PageHeader {
+    font-size: 20pt;
+    font-weight: 600;
+    color: #1F2933;
+}
+QLabel#SectionHeader, QLabel#HeaderLabel {
+    font-size: 16pt;
+    font-weight: 600;
+    color: #334155;
+}
+QLabel#CardTitle {
+    font-size: 15pt;
+    font-weight: 600;
+    color: #34495E;
+    padding-bottom: 8px;
+}
+QLabel#FormHeader {
+    font-size: 20pt;
+    font-weight: 700;
+    color: #1E293B;
+    padding-bottom: 10px;
+    border-bottom: 2px solid #3A7FF9;
+}
+QLabel#HelperLabel, QLabel#StatLabel, QLabel#ClientStatLabel {
+    font-size: 10pt;
+    color: #64748B;
+}
+QLabel#StatValue, QLabel#ClientStatValue {
+    font-size: 11pt;
+    font-weight: 600;
+    color: #334155;
+    padding: 0px;
+    margin: 0px;
+}
+QLabel#StatLabel {
+    padding: 0px;
+    margin: 0px;
+}
+QLabel#ClientName {
+    font-size: 16pt;
+    font-weight: 600;
+    color: #1E293B;
+}
+QLabel#ClientPackets {
+    font-size: 14pt;
+    font-weight: 500;
+    color: #1E293B;
+}
+QLabel#ClientsSectionTag {
+    color: #334155;
+    font-size: 13pt;
+    font-weight: 700;
+}
+QLabel[class="graph-placeholder"] {
+    border: 1px dashed #CBD5F5;
+    border-radius: 12px;
+    color: #94A3B8;
+    font-style: italic;
+}
+
+/*Buttons*/
+QPushButton {
+    background-color: #3A7FF9;
+    color: #FFFFFF;
+    border: none;
+    outline: none;
+    padding: 8px 16px;
+    border-radius: 6px;
+    font-weight: 600;
+    font-size: 10pt;
+}
+QPushButton:hover {
+    background-color: #2563EB;
+}
+QPushButton:pressed {
+    background-color: #1D4ED8;
+}
+QPushButton#StartButton {
+    background-color: #10B981;
+}
+QPushButton#StartButton:hover {
+    background-color: #059669;
+}
+QPushButton#StopButton {
+    background-color: #EF4444;
+}
+QPushButton#StopButton:hover {
+    background-color: #DC2626;
+}
+QPushButton#ClientsHeaderButton {
+    background-color: #FFFFFF;
+    color: #475569;
+    border: 1px solid #E2E8F0;
+    border-radius: 8px;
+    padding: 8px 20px;
+    min-width: 100px;
+}
+QPushButton#ClientsHeaderButton:hover {
+    background-color: #FFFFFF;
+    border-color: #3A7FF9;
+    color: #3A7FF9;
+}
+QPushButton#ClientsHeaderButton:pressed {
+    background-color: #F1F5F9;
+    border-color: #2563EB;
+    color: #2563EB;
+}
+QPushButton#FormCancelButton {
+    background-color: #F8FAFC;
+    color: #475569;
+    border: 1px solid #E2E8F0;
+}
+QPushButton#FormCancelButton:hover {
+    background-color: #F1F5F9;
+    color: #1E293B;
+    border-color: #CBD5E1;
+}
+QPushButton#FormCancelButton:pressed {
+    background-color: #E2E8F0;
+}
+
+/*Inputs & Forms*/
+QLineEdit#FormInput, QLineEdit#TerminalInput, QComboBox#FormInput {
+    border: 1px solid #CBD5E1;
+    border-radius: 8px;
+    padding: 10px;
+    background-color: #FFFFFF;
+    color: #2C3E50;
+    font-size: 10pt;
+}
+QLineEdit#FormInput:focus, QLineEdit#TerminalInput:focus, QComboBox#FormInput:focus {
+    border: 1px solid #3A7FF9;
+    background-color: #FFFFFF;
+}
+
+/*Tables & Lists*/
+QTableView, QTableWidget {
+    background-color: #FFFFFF;
+    border: none;
+    gridline-color: transparent;
+    selection-background-color: #F1F5F9;
+    selection-color: #1E293B;
+    outline: none;
+}
+QHeaderView::section {
+    background-color: #FFFFFF;
+    padding: 16px;
+    border: none;
+    border-bottom: 1px solid #E2E8F0;
+    font-weight: 600;
+    color: #64748B;
+    font-size: 10pt;
+    text-align: left;
+}
+QTableWidget::item {
+    padding: 16px;
+    border-bottom: 1px solid #F8FAFC;
+    color: #334155;
+    font-size: 10pt;
+}
+QTableWidget::item:selected {
+    background-color: #F8FAFC;
+    color: #1E293B;
+}
+QListWidget {
+    background-color: #FFFFFF;
+    border: none;
+    outline: none;
+}
+QListWidget::item {
+    padding: 10px;
+    border-bottom: 1px solid #ECF0F1;
+}
+QListWidget::item:selected {
+    background-color: #E3F2FF;
+    color: #1E88E5;
+}
+QListWidget#LogFileList,QListWidget#LogsFileList {
+    border: 1px solid #E2E8F0;
+    border-radius: 12px;
+    padding: 8px;
+    background-color: #F8FAFC;
+}
+
+/*Console*/
+QLabel#ConsoleTitle {
+    font-size: 20pt;
+    font-weight: 600;
+    color: #1E293B;
+    background-color: transparent;
+    padding: 0px;
+}
+QLabel#ConsoleHelpHint {
+    font-size: 10pt;
+    color: #3A7FF9;
+    font-weight: 500;
+    border: 1px solid #3A7FF9;
+    border-radius: 12px;
+    padding: 4px 12px;
+    background-color: #E3F2FD;
+}
+QTextEdit#ConsoleOutput {
+    background-color: #0F172A;
+    border: 1px solid #1E293B;
+    border-radius: 14px;
+    color: #E2E8F0;
+    font-family: "Consolas", "Courier New", monospace;
+    font-size: 11pt;
+    padding: 12px;
+    selection-background-color: #3A7FF9;
+    selection-color: #FFFFFF;
+}
