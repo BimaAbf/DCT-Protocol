@@ -140,14 +140,14 @@ class Server:
             console.log.blue(f"[SHUTDOWN] Received SHUTDOWN from DeviceID {deviceId} at {origin}. Ignoring.")
         
         elif msgType == MSG_BATCHED_DATA:
-            self.BatchTelemetry((deviceId, msgType, seqNum, timestampOffset, payloadLen), bodyBlob, origin, ingressTime, cpu_start)
+            self.BatchTelemetry((deviceId, msgType, seqNum, payloadLen), bodyBlob, origin, ingressTime, cpu_start)
         elif msgType == MSG_TIME_SYNC:
             state = self.unitMap.get(deviceId)
             try:
-                baseTimeVal = struct.unpack('!I', bodyBlob)[0]
+                baseTimeVal = struct.unpack('!i', bodyBlob)[0]
                 state['base_time'] = baseTimeVal
                 console.log.blue(f"[TIME_SYNC] DeviceID {deviceId} set base time to {time.ctime(baseTimeVal)}.")
-                duplicateFlag, gapFlag, delayedFlag = self.classifyPacket(deviceId, seqNum, state)
+                duplicateFlag, gapFlag, delayedFlag = self.classifyPacket(deviceId, seqNum, state, msgType)
                 cpu_duration = time.perf_counter() - cpu_start
                 self.csvLogger.log_packet(msgType,deviceId, seqNum, baseTimeVal + timestampOffset, ingressTime,-1 ,duplicateFlag, gapFlag,
                                           delayedFlag, cpu_duration,HEADER_SIZE + payloadLen)
@@ -252,7 +252,7 @@ class Server:
 
 
     def BatchTelemetry(self, metaTuple: tuple, payload: bytes, origin: Tuple[str, int], ingressTime: float,cpu_start: float):
-        deviceId, msgType, seqNum, timestampOffset, payloadLen = metaTuple
+        deviceId, msgType, seqNum, payloadLen = metaTuple
 
         if self.unitMap.__contains__(deviceId) is False:
             console.log.yellow(f"[Packet Error] Received batch packet from unknown DeviceID {deviceId} at {origin}. Discarding.")
@@ -266,7 +266,6 @@ class Server:
                 entryType= struct.unpack('!B', payload[offset + 2:offset + 3])[0]
 
                 if entryType == MSG_KEYFRAME:
-
                     value = struct.unpack('!h', payload[offset + 3:offset + 5])[0]
                     entryPayload = struct.pack('!h', value)
                     entryMeta = (deviceId, entryType, seqNum, entryOffset, payloadLen)
@@ -279,7 +278,7 @@ class Server:
 
                     value = struct.unpack('!b', payload[offset + 3:offset + 4])[0]
                     entryPayload = struct.pack('!b', value)
-                    entryMeta = (deviceId, entryType, seqNum, entryOffset, payloadLen)
+                    entryMeta = (deviceId, entryType, seqNum, entryOffset,payloadLen)
 
                     self.trackTelemetry(entryMeta, entryPayload, origin, ingressTime, cpu_start)
                     offset += 4
@@ -307,7 +306,7 @@ class Server:
 
         state = self.unitMap[deviceId]
 
-        duplicateFlag, gapFlag, delayedFlag = self.classifyPacket(deviceId, seqNum, state)
+        duplicateFlag, gapFlag, delayedFlag = self.classifyPacket(deviceId, seqNum, state, msgType)
         baseTime = state['base_time']
         fullTimestamp = baseTime + timestampOffset
 
@@ -348,7 +347,8 @@ class Server:
                                           duplicateFlag, gapFlag,delayedFlag, cpu_duration, HEADER_SIZE + payloadLen)
             elif msgType == MSG_HEARTBEAT:
                 console.log.blue(f"[HEARTBEAT] Liveness ping from DeviceID {deviceId}.")
-                self.csvLogger.log_packet(msgType, deviceId, seqNum, fullTimestamp, ingressTime, state['signal_value'],
+                if not state['batching']:
+                    self.csvLogger.log_packet(msgType, deviceId, seqNum, fullTimestamp, ingressTime, state['signal_value'],
                                           duplicateFlag, gapFlag, delayedFlag, cpu_duration, HEADER_SIZE + payloadLen)
             else:
                 console.log.yellow(f"[Packet Error] Unknown message type {msgType} from DeviceID {deviceId}. Discarding.")
@@ -416,7 +416,7 @@ class Server:
                         intervalNote = f"{avgInterval:.2f}s" if avgInterval else "n/a"
                         console.log.red(f"[Timeout] DeviceID {deviceId} idle for {idleTime:.1f}s at {deviceProfile.get('bind_addr')} (interval {intervalNote}, threshold {ceiling:.1f}s, last gap: {deviceProfile.get('last_gap')}).")
 
-    def classifyPacket(self, deviceId: int, seqNum: int, state: Dict[str, Any]) -> Tuple[bool, bool, bool]:
+    def classifyPacket(self, deviceId: int, seqNum: int, state: Dict[str, Any], msgType: int ) -> Tuple[bool, bool, bool]:
         duplicateFlag,gapFlag,delayedFlag = False,False,False
 
         headSeq = state['current_seq']
@@ -429,6 +429,8 @@ class Server:
         if seqNum in state['seen_set'] and seqNum != 0:
 
             if state['batching']:
+                if msgType == MSG_HEARTBEAT:
+                    return (False, gapFlag, delayedFlag)
                 if state['seen_count'].get(seqNum) is None:
                     state['seen_count'][seqNum] = 1
 
