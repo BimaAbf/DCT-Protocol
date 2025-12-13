@@ -12,8 +12,8 @@ class Logger:
         self.vault_path = log_directory
         self.tag_prefix = filename_prefix
         self.registry = {}
-        self._heading = ['msg_type','device_id', 'seq','batch_index', 'timestamp', 'arrival_time', 'value',
-                         'duplicate_flag', 'gap_flag', 'delayed_flag', 'cpu_time_ms','packet_size']
+        self._heading = ['msg_type','device_id', 'seq', 'timestamp', 'arrival_time', 'value',
+                         'duplicate_flag', 'gap_flag', 'delayed_flag', 'cpu_time_ms','packet_size','batch_index']
 
     def start(self, start_time: float) -> bool:
         try:
@@ -45,7 +45,6 @@ class Logger:
                     'msg_type': message_type,
                     'device_id': device_id,
                     'seq': seq_num,
-                    'batch_index': batch_index,
                     'timestamp_s': timestamp_s,
                     'arrival_s': arrival_time,
                     'value': value,
@@ -53,7 +52,8 @@ class Logger:
                     'gap': 1 if is_gap else 0,
                     'delayed': 1 if is_delayed else 0,
                     'cpu_time_ms': cpu_ms,
-                    'packet_size': packet_size
+                    'packet_size': packet_size,
+                    'batch_index': batch_index,
                 }
                 self.registry[
                     (device_id, seq_num, batch_index)] = record_line
@@ -93,7 +93,6 @@ class Logger:
                 entry['msg_type'],
                 entry['device_id'],
                 entry['seq'],
-                entry['batch_index'],
                 readable_stamp,
                 readable_arrival,
                 entry['value'],
@@ -101,7 +100,8 @@ class Logger:
                 entry['gap'],
                 entry['delayed'],
                 entry['cpu_time_ms'],
-                entry['packet_size']
+                entry['packet_size'].
+                entry['batch_index']
             ])
 
         self.binder.flush()
