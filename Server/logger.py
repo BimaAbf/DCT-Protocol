@@ -11,8 +11,8 @@ class Logger:
         self.binder = None
         self.vault_path = log_directory
         self.tag_prefix = filename_prefix
-        self.registry = []
-        self._heading = ['msg_type','device_id', 'seq', 'timestamp', 'arrival_time', 'value',
+        self.registry = {}
+        self._heading = ['msg_type','device_id', 'seq','batch_index', 'timestamp', 'arrival_time', 'value',
                          'duplicate_flag', 'gap_flag', 'delayed_flag', 'cpu_time_ms','packet_size']
 
     def start(self, start_time: float) -> bool:
@@ -25,7 +25,7 @@ class Logger:
 
             self.binder = open(storage_path, 'w', newline='')
             self.sheet = csv.writer(self.binder)
-            self.registry = []
+            self.registry = {}
 
             self.sheet.writerow(self._heading)
 
@@ -35,8 +35,9 @@ class Logger:
             console.log.red(f"[Logger] FATAL: Could not open CSV file. {e}")
             return False
 
-    def log_packet(self,message_type : int, device_id: int, seq_num: int, timestamp_s: float, arrival_time: float, value : int,is_duplicate: bool,
-                   is_gap: bool, is_delayed: bool, cpu_time_s: float, packet_size: int):
+    def log_packet(self, message_type: int, device_id: int, seq_num: int, timestamp_s: float, arrival_time: float,
+                   value: int, is_duplicate: bool, is_gap: bool, is_delayed: bool, cpu_time_s: float, packet_size: int,
+                   batch_index: int = 0):
         if self.sheet and self.binder:
             try:
                 cpu_ms = cpu_time_s * 1000.0
@@ -44,23 +45,40 @@ class Logger:
                     'msg_type': message_type,
                     'device_id': device_id,
                     'seq': seq_num,
+                    'batch_index': batch_index,
                     'timestamp_s': timestamp_s,
                     'arrival_s': arrival_time,
-                    'value' : value,
+                    'value': value,
                     'duplicate': 1 if is_duplicate else 0,
                     'gap': 1 if is_gap else 0,
                     'delayed': 1 if is_delayed else 0,
                     'cpu_time_ms': cpu_ms,
                     'packet_size': packet_size
                 }
-                self.registry.append(record_line)
-                self._rewrite_sheet()
+                self.registry[
+                    (device_id, seq_num, batch_index)] = record_line
+                # self._rewrite_sheet()
             except IOError as e:
                 console.log.red(f"[CSV Error] Failed to write to CSV file. {e}")
 
+    def update_flags_by_seq(self, seq_num: int, device_id: int, batch_index: int, is_duplicate: bool, is_gap: bool,
+                            is_delayed: bool):
+        key = (device_id, seq_num, batch_index)
+        if key in self.registry:
+            entry = self.registry[key]
+            entry['duplicate'] = 1 if is_duplicate else 0
+            entry['gap'] = 1 if is_gap else 0
+            entry['delayed'] = 1 if is_delayed else 0
+            self._rewrite_sheet()
+            console.log.green(
+                f"[Logger] Updated flags for DeviceID {device_id}, Seq {seq_num}, BatchIndex {batch_index}.")
+        else:
+            console.log.yellow(
+                f"[Logger] No matching entry found for DeviceID {device_id}, Seq {seq_num}, BatchIndex {batch_index}.")
+
     def _rewrite_sheet(self) -> None:
         ordered_rows = sorted(
-            self.registry,
+            self.registry.values(),
             key=lambda entry: (entry['device_id'], entry['seq'])
         )
 
@@ -75,6 +93,7 @@ class Logger:
                 entry['msg_type'],
                 entry['device_id'],
                 entry['seq'],
+                entry['batch_index'],
                 readable_stamp,
                 readable_arrival,
                 entry['value'],
