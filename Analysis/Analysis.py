@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Console-only analysis for server CSV logs."""
+"""Console analysis for the newest server log, with corrected expectations."""
 
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Iterable
 
 import pandas as pd
-
 
 LOG_PATTERN = "server_log_*.csv"
 EXPECTED_COLUMNS = {
@@ -21,358 +21,337 @@ EXPECTED_COLUMNS = {
     "delayed_flag",
     "cpu_time_ms",
     "packet_size",
+    "batch_index",
 }
-def main() -> None:
-    project_root = Path(__file__).resolve().parent.parent
-    logs_path = project_root / "Server" / "logs"
+
+MSG_STARTUP = 0x01
+MSG_TIME_SYNC = 0x03
+MSG_KEYFRAME = 0x04
+MSG_DATA_DELTA = 0x05
+MSG_HEARTBEAT = 0x06
+
+MESSAGE_NAMES = {
+    MSG_STARTUP: "MSG_STARTUP",
+    MSG_TIME_SYNC: "MSG_TIME_SYNC",
+    MSG_KEYFRAME: "MSG_KEYFRAME",
+    MSG_DATA_DELTA: "MSG_DATA_DELTA",
+    MSG_HEARTBEAT: "MSG_HEARTBEAT",
+}
+
+TYPE_SHORT_NAMES = {
+    MSG_STARTUP: "startup",
+    MSG_TIME_SYNC: "time_sync",
+    MSG_KEYFRAME: "keyframe",
+    MSG_DATA_DELTA: "data_delta",
+    MSG_HEARTBEAT: "heartbeat",
+}
+
+EXPECTED_MSG_TYPES = list(MESSAGE_NAMES.keys())
+DEFAULT_DELTA_THRESHOLD = 5
+
+
+def _latest_log(paths: Iterable[Path]) -> Path:
     try:
-        latest_log = max(logs_path.glob(LOG_PATTERN), key=lambda entry: entry.stat().st_mtime)
-    except ValueError as exc:
+        return max(paths, key=lambda entry: entry.stat().st_mtime)
+    except ValueError as exc:  # pragma: no cover - defensive
         raise FileNotFoundError("No server_log_*.csv files found in Server/logs/") from exc
-
-    frame = pd.read_csv(latest_log)
-    missing_columns = EXPECTED_COLUMNS.difference(frame.columns)
-    if missing_columns:
-        raise ValueError(f"CSV {latest_log.name} missing columns: {sorted(missing_columns)}")
-
-    for column in ("msg_type", "device_id", "seq"):
-        frame[column] = pd.to_numeric(frame[column], errors="coerce").astype("Int64")
-
-    frame["value"] = pd.to_numeric(frame["value"], errors="coerce")
-    frame["cpu_time_ms"] = pd.to_numeric(frame["cpu_time_ms"], errors="coerce")
-    frame["packet_size"] = pd.to_numeric(frame["packet_size"], errors="coerce")
-    frame["timestamp"] = pd.to_datetime(frame["timestamp"], errors="coerce")
-    frame["arrival_time"] = pd.to_datetime(frame["arrival_time"], errors="coerce")
-
-    for flag_column in ("duplicate_flag", "gap_flag", "delayed_flag"):
-        frame[flag_column] = pd.to_numeric(frame[flag_column], errors="coerce").fillna(0).astype(int)
-
-    frame = frame.dropna(subset=["msg_type", "device_id", "seq", "timestamp", "arrival_time"])
-    frame = frame.sort_values(["device_id", "arrival_time", "seq"]).reset_index(drop=True)
-
-    total_packets = int(len(frame))
-    duplicate_packets = int(frame["duplicate_flag"].sum())
-    gap_packets = int(frame["gap_flag"].sum())
-    delayed_packets = int(frame["delayed_flag"].sum())
-    received_packets = total_packets - duplicate_packets
-    expected_packets = total_packets + gap_packets
-    expected_packets = expected_packets if expected_packets else total_packets or 1
-
-    received_pct = received_packets / expected_packets * 100.0
-    duplicate_pct = duplicate_packets / expected_packets * 100.0
-    loss_pct = gap_packets / expected_packets * 100.0
-
-    metrics_rows = [
-        ("log_file", latest_log.relative_to(project_root).as_posix(), ""),
-        ("total_packets", total_packets, ""),
-        ("received_packets", received_packets, f"{received_pct:.2f}% of expected"),
-        ("duplicate_packets", duplicate_packets, f"{duplicate_pct:.2f}% of expected"),
-        ("gap_flagged_packets", gap_packets, f"{loss_pct:.2f}% loss estimate"),
-        ("delayed_packets", delayed_packets, ""),
-        ("unique_devices", int(frame["device_id"].nunique()), ""),
-        ("unique_msg_types", int(frame["msg_type"].nunique()), ""),
-    ]
-
-    if frame["packet_size"].notna().any():
-        metrics_rows.append(("total_bytes", float(frame["packet_size"].sum()), ""))
-        metrics_rows.append(("avg_packet_size", float(frame["packet_size"].mean()), ""))
-
-    if frame["cpu_time_ms"].notna().any():
-        metrics_rows.append(("avg_cpu_time_ms", float(frame["cpu_time_ms"].mean()), ""))
-        metrics_rows.append(("median_cpu_time_ms", float(frame["cpu_time_ms"].median()), ""))
-
-    print("\nMetric overview:\n")
-    print(pd.DataFrame(metrics_rows, columns=["metric", "value", "note"]).to_string(index=False, justify="left"))
-
-    frame["latency_s"] = (frame["arrival_time"] - frame["timestamp"]).dt.total_seconds()
-    per_device_rows = []
-    for device_id, group in frame.groupby("device_id", dropna=False):
-        packets = int(group.shape[0])
-        duplicates = int(group["duplicate_flag"].sum())
-        gaps = int(group["gap_flag"].sum())
-        received = packets - duplicates
-        expected = packets + gaps if (packets + gaps) else packets or 1
-        loss_rate = gaps / expected * 100.0
-        recv_rate = received / expected * 100.0
-        duplicate_rate = duplicates / expected * 100.0
-
-        average_latency_ms = (group["latency_s"].mean() * 1000.0) if group["latency_s"].notna().any() else float("nan")
-        average_cpu_ms = group["cpu_time_ms"].mean() if group["cpu_time_ms"].notna().any() else float("nan")
-        average_packet_size = group["packet_size"].mean() if group["packet_size"].notna().any() else float("nan")
-
-        per_device_rows.append({
-            "device_id": int(device_id) if device_id == device_id else "nan",
-            "packets": packets,
-            "received": received,
-            "received_pct": recv_rate,
-            "lost": gaps,
-            "loss_pct": loss_rate,
-            "duplicates": duplicates,
-            "duplicate_pct": duplicate_rate,
-            "avg_latency_ms": average_latency_ms,
-            "avg_cpu_ms": average_cpu_ms,
-            "avg_packet_size": average_packet_size,
-        })
-
-    if per_device_rows:
-        device_frame = pd.DataFrame(per_device_rows).set_index("device_id").sort_index()
-        print("\nPer-device analysis:\n")
-        print(device_frame.to_string(float_format=lambda value: f"{value:.2f}" if pd.notna(value) else "nan"))
-    else:
-        print("\nPer-device analysis:\nNo device records available.")
-
-    per_msg_rows = []
-    for msg_type, group in frame.groupby("msg_type", dropna=False):
-        packets = int(group.shape[0])
-        duplicates = int(group["duplicate_flag"].sum())
-        gaps = int(group["gap_flag"].sum())
-        received = packets - duplicates
-        expected = packets + gaps if (packets + gaps) else packets or 1
-        loss_rate = gaps / expected * 100.0
-        recv_rate = received / expected * 100.0
-        duplicate_rate = duplicates / expected * 100.0
-
-        average_latency_ms = (group["latency_s"].mean() * 1000.0) if group["latency_s"].notna().any() else float("nan")
-        average_cpu_ms = group["cpu_time_ms"].mean() if group["cpu_time_ms"].notna().any() else float("nan")
-        average_packet_size = group["packet_size"].mean() if group["packet_size"].notna().any() else float("nan")
-
-        per_msg_rows.append({
-            "msg_type": int(msg_type) if msg_type == msg_type else "nan",
-            "packets": packets,
-            "received": received,
-            "received_pct": recv_rate,
-            "lost": gaps,
-            "loss_pct": loss_rate,
-            "duplicates": duplicates,
-            "duplicate_pct": duplicate_rate,
-            "avg_latency_ms": average_latency_ms,
-            "avg_cpu_ms": average_cpu_ms,
-            "avg_packet_size": average_packet_size,
-        })
-
-    if per_msg_rows:
-        msg_frame = pd.DataFrame(per_msg_rows).set_index("msg_type").sort_index()
-        print("\nPer message-type analysis:\n")
-        print(msg_frame.to_string(float_format=lambda value: f"{value:.2f}" if pd.notna(value) else "nan"))
-
-    summary_rows = [{
-        "packets": total_packets,
-        "received": received_packets,
-        "received_pct": received_pct,
-        "lost": gap_packets,
-        "loss_pct": loss_pct,
-        "devices": int(frame["device_id"].nunique()),
-        "msg_types": int(frame["msg_type"].nunique()),
-    }]
-    print("\nSummary:\n")
-    print(pd.DataFrame(summary_rows).to_string(index=False, float_format=lambda value: f"{value:.2f}"))
-
-
-if __name__ == "__main__":
-    main()
-
-
-@dataclass
-class MetricEntry:
-    value: Optional[float]
-    note: Optional[str] = None
-
-
-def _project_root() -> Path:
-    return Path(__file__).resolve().parent.parent
-
-
-def _logs_dir() -> Path:
-    return _project_root() / "Server" / "logs"
-
-
-def _latest_log_file(candidates: Iterable[Path]) -> Path:
-    try:
-        return max(candidates, key=lambda path: path.stat().st_mtime)
-    except ValueError:
-        raise FileNotFoundError("No server_log_*.csv files found in Server/logs/")
 
 
 def _load_dataset(path: Path) -> pd.DataFrame:
-    df = pd.read_csv(path)
-    missing = EXPECTED_COLUMNS.difference(df.columns)
+    frame = pd.read_csv(path)
+    missing = EXPECTED_COLUMNS.difference(frame.columns)
     if missing:
         raise ValueError(f"CSV {path.name} missing columns: {sorted(missing)}")
 
     for col in ("msg_type", "device_id", "seq"):
-        df[col] = pd.to_numeric(df[col], errors="coerce").astype("Int64")
+        frame[col] = pd.to_numeric(frame[col], errors="coerce").astype("Int64")
 
-    df["value"] = pd.to_numeric(df["value"], errors="coerce")
-    df["cpu_time_ms"] = pd.to_numeric(df["cpu_time_ms"], errors="coerce")
-    df["packet_size"] = pd.to_numeric(df["packet_size"], errors="coerce")
-    df["timestamp"] = pd.to_datetime(df["timestamp"], errors="coerce")
-    df["arrival_time"] = pd.to_datetime(df["arrival_time"], errors="coerce")
+    frame["timestamp"] = pd.to_datetime(frame["timestamp"], errors="coerce")
+    frame["arrival_time"] = pd.to_datetime(frame["arrival_time"], errors="coerce")
 
     for flag in ("duplicate_flag", "gap_flag", "delayed_flag"):
-        df[flag] = pd.to_numeric(df[flag], errors="coerce").fillna(0).astype(int)
+        frame[flag] = pd.to_numeric(frame[flag], errors="coerce").fillna(0).astype(int)
 
-    df = df.dropna(subset=["msg_type", "device_id", "seq", "timestamp", "arrival_time"])
-    return df.sort_values(["device_id", "arrival_time", "seq"]).reset_index(drop=True)
+    frame["packet_size"] = pd.to_numeric(frame["packet_size"], errors="coerce")
+    frame["cpu_time_ms"] = pd.to_numeric(frame["cpu_time_ms"], errors="coerce")
+    frame["value"] = pd.to_numeric(frame["value"], errors="coerce")
+    frame["batch_index"] = pd.to_numeric(frame.get("batch_index", 0), errors="coerce").fillna(0).astype(int)
 
-
-def _latency_series(df: pd.DataFrame) -> pd.Series:
-    return (df["arrival_time"] - df["timestamp"]).dt.total_seconds().dropna()
-
-
-def _sequence_gap_count(df: pd.DataFrame) -> int:
-    window = df[["device_id", "seq"]].copy()
-    window["prev_seq"] = window.groupby("device_id")["seq"].shift(1)
-    window["delta"] = window["seq"] - window["prev_seq"]
-    window.loc[window["delta"] <= 0, "delta"] = 1
-    return int((window["delta"] - 1).clip(lower=0).sum())
+    frame = frame.dropna(subset=["msg_type", "device_id", "seq", "timestamp", "arrival_time"])
+    return frame.sort_values(["device_id", "seq", "batch_index", "arrival_time"]).reset_index(drop=True)
 
 
-def _summarise(df: pd.DataFrame) -> Tuple[Dict[str, MetricEntry], List[str]]:
-    metrics: Dict[str, MetricEntry] = {}
-    notes: List[str] = []
+def _sequence_gap_count(frame: pd.DataFrame) -> int:
+    missing = 0
+    unique_rows = frame[frame["duplicate_flag"] == 0]
+    for _, group in unique_rows.groupby("device_id"):
+        ordered = group.sort_values("seq")
+        diffs = ordered["seq"].diff().dropna()
+        diffs = diffs.where(diffs > 0, 1)  # treat resets or wrap-around as fresh sequences
+        missing += int((diffs - 1).clip(lower=0).sum())
+    return missing
 
-    total = int(len(df))
-    dup = int(df["duplicate_flag"].sum())
-    gap = int(df["gap_flag"].sum())
-    delayed = int(df["delayed_flag"].sum())
 
-    metrics["total_packets"] = MetricEntry(float(total))
-    metrics["unique_devices"] = MetricEntry(float(df["device_id"].nunique()))
-    metrics["unique_msg_types"] = MetricEntry(float(df["msg_type"].nunique()))
-    metrics["duplicates"] = MetricEntry(float(dup))
-    metrics["gap_flags"] = MetricEntry(float(gap))
-    metrics["delayed_flags"] = MetricEntry(float(delayed))
-    metrics["duplicate_rate"] = MetricEntry(dup / total if total else math.nan)
-    metrics["sequence_gap_estimate"] = MetricEntry(float(_sequence_gap_count(df)))
-
-    if df["packet_size"].notna().any():
-        metrics["total_bytes"] = MetricEntry(float(df["packet_size"].sum()))
-        metrics["avg_packet_size"] = MetricEntry(float(df["packet_size"].mean()))
-        metrics["p95_packet_size"] = MetricEntry(float(df["packet_size"].quantile(0.95)))
-
-    if df["cpu_time_ms"].notna().any():
-        metrics["avg_cpu_time_ms"] = MetricEntry(float(df["cpu_time_ms"].mean()))
-        metrics["median_cpu_time_ms"] = MetricEntry(float(df["cpu_time_ms"].median()))
-        metrics["p95_cpu_time_ms"] = MetricEntry(float(df["cpu_time_ms"].quantile(0.95)))
-
-    latency = _latency_series(df)
-    if latency.empty:
-        notes.append("Latency could not be derived; timestamp or arrival_time invalid")
+def _rate_breakdown(unique_count: int, duplicate_count: int, gap_count: int) -> dict[str, float]:
+    expected = unique_count + gap_count
+    if expected > 0:
+        received_pct = unique_count / expected * 100.0
+        loss_pct = gap_count / expected * 100.0
+        duplicate_pct = duplicate_count / expected * 100.0
     else:
-        metrics["median_latency_ms"] = MetricEntry(latency.median() * 1000.0)
-        metrics["p95_latency_ms"] = MetricEntry(latency.quantile(0.95) * 1000.0)
+        received_pct = loss_pct = duplicate_pct = float("nan")
+    return {
+        "expected": expected,
+        "received_pct": received_pct,
+        "loss_pct": loss_pct,
+        "duplicate_pct": duplicate_pct,
+    }
 
-    return metrics, notes
 
-
-def _per_device_table(df: pd.DataFrame) -> pd.DataFrame:
-    if df.empty:
+def _group_summary(label_key: str, frame: pd.DataFrame) -> pd.DataFrame:
+    if frame.empty:
         return pd.DataFrame()
 
-    per_device = df.copy()
-    per_device["latency_s"] = (per_device["arrival_time"] - per_device["timestamp"]).dt.total_seconds()
-    group = per_device.groupby("device_id", dropna=False)
+    rows: list[dict[str, float | int | str]] = []
+    for label, group in frame.groupby(label_key, dropna=False):
+        duplicate_count = int(group["duplicate_flag"].sum())
+        unique_count = int((group["duplicate_flag"] == 0).sum())
+        gap_count = _sequence_gap_count(group)
+        rates = _rate_breakdown(unique_count, duplicate_count, gap_count)
 
-    table = pd.DataFrame({
-        "packets": group.size(),
-        "duplicates": group["duplicate_flag"].sum(),
-        "duplicate_rate": group["duplicate_flag"].mean(),
-        "gap_flags": group["gap_flag"].sum(),
-        "delayed_flags": group["delayed_flag"].sum(),
-        "median_latency_ms": group["latency_s"].median() * 1000.0,
-        "p95_latency_ms": group["latency_s"].quantile(0.95) * 1000.0,
-    })
+        latency_ms = (group["arrival_time"] - group["timestamp"]).dt.total_seconds().dropna() * 1000.0
+        cpu_series = group.loc[group["duplicate_flag"] == 0, "cpu_time_ms"].dropna()
+        size_series = group.loc[group["duplicate_flag"] == 0, "packet_size"].dropna()
 
-    if per_device["value"].notna().any():
-        table["value_mean"] = group["value"].mean()
-        table["value_min"] = group["value"].min()
-        table["value_max"] = group["value"].max()
+        rows.append({
+            label_key: int(label) if label == label else "nan",
+            "packets": int(group.shape[0]),
+            "expected": rates["expected"],
+            "received": unique_count,
+            "lost": gap_count,
+            "duplicates": duplicate_count,
+            "received_pct": rates["received_pct"],
+            "loss_pct": rates["loss_pct"],
+            "duplicate_pct": rates["duplicate_pct"],
+            "avg_latency_ms": float(latency_ms.mean()) if not latency_ms.empty else float("nan"),
+            "avg_cpu_ms": float(cpu_series.mean()) if not cpu_series.empty else float("nan"),
+            "avg_packet_size": float(size_series.mean()) if not size_series.empty else float("nan"),
+        })
 
-    if per_device["cpu_time_ms"].notna().any():
-        table["avg_cpu_ms"] = group["cpu_time_ms"].mean()
-        table["p95_cpu_ms"] = group["cpu_time_ms"].quantile(0.95)
-
-    if per_device["packet_size"].notna().any():
-        table["avg_pkt_size"] = group["packet_size"].mean()
-        table["total_bytes"] = group["packet_size"].sum()
-
-    return table.sort_index()
-
-
-def _per_msg_type_table(df: pd.DataFrame) -> pd.DataFrame:
-    if df.empty:
-        return pd.DataFrame()
-
-    series_latency = (df["arrival_time"] - df["timestamp"]).dt.total_seconds()
-    msg_group = df.copy()
-    msg_group["latency_s"] = series_latency
-    group = msg_group.groupby("msg_type", dropna=False)
-
-    table = pd.DataFrame({
-        "packets": group.size(),
-        "duplicate_rate": group["duplicate_flag"].mean(),
-        "median_latency_ms": group["latency_s"].median() * 1000.0,
-    })
-
-    if msg_group["cpu_time_ms"].notna().any():
-        table["avg_cpu_ms"] = group["cpu_time_ms"].mean()
-
-    if msg_group["packet_size"].notna().any():
-        table["avg_pkt_size"] = group["packet_size"].mean()
-
-    return table.sort_index()
+    return pd.DataFrame(rows).set_index(label_key).sort_index()
 
 
-def _print_metrics(metrics: Dict[str, MetricEntry]) -> None:
-    frame = pd.DataFrame(
-        [(key, entry.value, entry.note or "") for key, entry in metrics.items()],
-        columns=["metric", "value", "note"],
-    ).sort_values("metric")
-    print("\nMetric overview:\n")
-    print(frame.to_string(index=False, justify="left"))
+def _estimate_delta_threshold(group: pd.DataFrame) -> int:
+    typed = group.sort_values(["seq", "batch_index"])
+    min_diff = None
+    last_value = None
+    for _, row in typed.iterrows():
+        value = row.get("value")
+        if pd.isna(value):
+            continue
+        if row["msg_type"] == MSG_DATA_DELTA and last_value is not None:
+            diff = abs(float(value) - float(last_value))
+            if diff > 0:
+                min_diff = diff if min_diff is None else min(min_diff, diff)
+        if row["msg_type"] in {MSG_DATA_DELTA, MSG_KEYFRAME}:
+            last_value = value
+    if min_diff is None:
+        return DEFAULT_DELTA_THRESHOLD
+    estimate = int(round(min_diff)) - 1
+    if estimate <= 0:
+        return DEFAULT_DELTA_THRESHOLD
+    return estimate
+
+
+def _expected_counts_for_device(group: pd.DataFrame) -> tuple[dict[int, int], dict[str, int]]:
+    if group.empty:
+        return ({msg: 0 for msg in EXPECTED_MSG_TYPES}, {"total_expected": 0, "delta_threshold": DEFAULT_DELTA_THRESHOLD})
+
+    max_seq = pd.to_numeric(group["seq"], errors="coerce").dropna()
+    if max_seq.empty:
+        return ({msg: 0 for msg in EXPECTED_MSG_TYPES}, {"total_expected": 0, "delta_threshold": DEFAULT_DELTA_THRESHOLD})
+
+    total_expected = int(max_seq.max()) + 1
+    expected = {msg: 0 for msg in EXPECTED_MSG_TYPES}
+
+    expected_startup = 1 if total_expected >= 1 else 0
+    expected_time_sync = 0
+    if total_expected >= 2:
+        expected_time_sync = 1 + ((total_expected - 1) // 100)
+    expected_keyframe = 0
+    if total_expected >= 3:
+        multiples_of_10 = (total_expected - 1) // 10
+        multiples_of_100 = (total_expected - 1) // 100
+        expected_keyframe = 1 + max(multiples_of_10 - multiples_of_100, 0)
+
+    core_budget = total_expected - (expected_startup + expected_time_sync + expected_keyframe)
+    if core_budget < 0:
+        core_budget = 0
+
+    delta_threshold = _estimate_delta_threshold(group)
+    if delta_threshold <= 0:
+        heartbeat_prob = 1.0
+    else:
+        total_range = 20 * delta_threshold + 1
+        heartbeat_prob = (2 * delta_threshold + 1) / total_range
+
+    expected_heartbeat = int(round(core_budget * heartbeat_prob))
+    expected_heartbeat = min(core_budget, max(expected_heartbeat, 0))
+    expected_data_delta = core_budget - expected_heartbeat
+
+    expected[MSG_STARTUP] = expected_startup
+    expected[MSG_TIME_SYNC] = expected_time_sync
+    expected[MSG_KEYFRAME] = expected_keyframe
+    expected[MSG_HEARTBEAT] = expected_heartbeat
+    expected[MSG_DATA_DELTA] = expected_data_delta
+
+    meta = {
+        "total_expected": total_expected,
+        "delta_threshold": delta_threshold,
+    }
+    return expected, meta
+
+
+def _collect_expectations(frame: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
+    device_records: list[tuple[int, dict[str, int]]] = []
+    expected_totals = {msg: 0 for msg in EXPECTED_MSG_TYPES}
+    observed_totals = {msg: 0 for msg in EXPECTED_MSG_TYPES}
+
+    for device_id, group in frame.groupby("device_id"):
+        expected_counts, meta = _expected_counts_for_device(group)
+        observed_counts = group["msg_type"].value_counts().to_dict()
+
+        recorded_packets = int(group.shape[0])
+        total_expected = meta["total_expected"]
+        device_row: dict[str, int] = {
+            "expected_packets": total_expected,
+            "recorded_packets": recorded_packets,
+            "missing_packets": total_expected - recorded_packets,
+            "delta_thresh_est": meta["delta_threshold"],
+        }
+
+        for msg in EXPECTED_MSG_TYPES:
+            short = TYPE_SHORT_NAMES[msg]
+            exp_val = int(expected_counts.get(msg, 0))
+            rec_val = int(observed_counts.get(msg, 0))
+            device_row[f"exp_{short}"] = exp_val
+            device_row[f"rec_{short}"] = rec_val
+            device_row[f"miss_{short}"] = exp_val - rec_val
+            expected_totals[msg] += exp_val
+            observed_totals[msg] += rec_val
+
+        device_records.append((device_id, device_row))
+
+    if device_records:
+        device_df = pd.DataFrame.from_dict({device: row for device, row in device_records}, orient="index").sort_index()
+    else:
+        device_df = pd.DataFrame()
+
+    msg_rows = []
+    for msg in EXPECTED_MSG_TYPES:
+        exp_total = expected_totals[msg]
+        rec_total = observed_totals.get(msg, 0)
+        missing = exp_total - rec_total
+        missing_pct = (missing / exp_total * 100.0) if exp_total else float("nan")
+        msg_rows.append({
+            "msg_name": MESSAGE_NAMES[msg],
+            "expected": exp_total,
+            "recorded": rec_total,
+            "missing": missing,
+            "missing_pct": missing_pct,
+        })
+
+    msg_df = pd.DataFrame(msg_rows).set_index("msg_name") if msg_rows else pd.DataFrame()
+    return msg_df, device_df
 
 
 def main() -> None:
-    root = _project_root()
-    logs_dir = _logs_dir()
-    latest = _latest_log_file(logs_dir.glob(LOG_PATTERN))
-    print(f"Using log file: {latest.relative_to(root)}")
+    project_root = Path(__file__).resolve().parent.parent
+    logs_dir = project_root / "Server" / "logs"
+    latest_log = _latest_log(logs_dir.glob(LOG_PATTERN))
 
-    df = _load_dataset(latest)
-    metrics, notes = _summarise(df)
-    _print_metrics(metrics)
-    if notes:
-        print("\nNotes:")
-        for item in notes:
-            print(f"  - {item}")
+    frame = _load_dataset(latest_log)
 
-    per_device = _per_device_table(df)
-    if not per_device.empty:
+    duplicate_count = int(frame["duplicate_flag"].sum())
+    unique_count = int((frame["duplicate_flag"] == 0).sum())
+    gap_count = _sequence_gap_count(frame)
+    rates = _rate_breakdown(unique_count, duplicate_count, gap_count)
+
+    non_duplicate = frame[frame["duplicate_flag"] == 0]
+    bytes_series = non_duplicate["packet_size"].dropna()
+    cpu_series = non_duplicate["cpu_time_ms"].dropna()
+
+    metrics_rows = [
+        ("log_file", latest_log.relative_to(project_root).as_posix(), ""),
+        ("packets_expected", float(rates["expected"]), "unique + inferred gaps"),
+        ("packets_recorded", float(frame.shape[0]), "rows in log"),
+        ("packets_received", float(unique_count), f"{rates['received_pct']:.2f}% of expected"),
+        ("duplicate_rate", rates["duplicate_pct"] / 100.0 if rates["expected"] > 0 else float("nan"), "fraction of expected"),
+        ("sequence_gap_count", float(gap_count), ""),
+        ("cpu_ms_per_report", float(cpu_series.mean()) if not cpu_series.empty else float("nan"), "non-duplicates"),
+        ("bytes_per_report", float(bytes_series.mean()) if not bytes_series.empty else float("nan"), "non-duplicates"),
+    ]
+
+    metrics_df = pd.DataFrame(metrics_rows, columns=["metric", "value", "note"])
+
+    print("\nMetric overview:\n")
+    print(metrics_df.to_string(index=False, justify="left"))
+
+    device_table = _group_summary("device_id", frame)
+    if not device_table.empty:
         print("\nPer-device analysis:\n")
-        print(
-            per_device.to_string(
-                float_format=lambda x: f"{x:.2f}" if pd.notna(x) else "nan"
-            )
-        )
+        print(device_table.to_string(float_format=lambda x: f"{x:.2f}" if pd.notna(x) else "nan"))
     else:
         print("\nPer-device analysis:\nNo device records available.")
 
-    per_msg_type = _per_msg_type_table(df)
-    if not per_msg_type.empty:
-        print("\nPer message-type analysis:\n")
-        print(
-            per_msg_type.to_string(
-                float_format=lambda x: f"{x:.2f}" if pd.notna(x) else "nan"
-            )
-        )
+    msg_expectations, _ = _collect_expectations(frame)
 
-    summary = {
-        "packets": int(len(df)),
-        "devices": int(df["device_id"].nunique()),
-        "msg_types": int(df["msg_type"].nunique()),
-    }
+    if not msg_expectations.empty:
+        print("\nExpected vs recorded by message type:\n")
+        print(msg_expectations.to_string(float_format=lambda x: f"{x:.2f}" if pd.notna(x) else "nan"))
+
+    summary_rows = [{
+        "packets": int(frame.shape[0]),
+        "expected": rates["expected"],
+        "received": float(unique_count),
+        "received_pct": rates["received_pct"],
+        "lost": float(gap_count),
+        "loss_pct": rates["loss_pct"],
+        "duplicates": float(duplicate_count),
+        "duplicate_pct": rates["duplicate_pct"],
+        "devices": int(frame["device_id"].nunique()),
+        "msg_types": int(frame["msg_type"].nunique()),
+    }]
+    summary_df = pd.DataFrame(summary_rows)
     print("\nSummary:\n")
-    print(pd.DataFrame([summary]).to_string(index=False, justify="left"))
+    print(summary_df.to_string(index=False, float_format=lambda x: f"{x:.2f}"))
+
+    export_rows = []
+    metrics_export = metrics_df.copy()
+    metrics_export.insert(0, "section", "metrics")
+    export_rows.append(metrics_export)
+
+    if not device_table.empty:
+        device_export = device_table.reset_index().rename(columns={"index": "device_id"})
+        device_export.insert(0, "section", "per_device")
+        export_rows.append(device_export)
+
+    if not msg_expectations.empty:
+        msg_export = msg_expectations.reset_index().rename(columns={"index": "msg_name"})
+        msg_export.insert(0, "section", "msg_expectations")
+        export_rows.append(msg_export)
+
+    summary_export = summary_df.copy()
+    summary_export.insert(0, "section", "summary")
+    export_rows.append(summary_export)
+
+    combined = pd.concat(export_rows, ignore_index=True, sort=False)
+    export_dir = project_root / "Analysis"
+    export_dir.mkdir(parents=True, exist_ok=True)
+    log_stem = latest_log.stem.replace("server_log_", "")
+    output_path = export_dir / f"analysis_output_{log_stem}.csv"
+    combined.to_csv(output_path.as_posix(), index=False)
+    print(f"\nAnalysis exported to {output_path.relative_to(project_root)}")
 
 
 if __name__ == "__main__":

@@ -1,6 +1,6 @@
 NETEM_ENABLED=1
 NETEM_PROFILE=test2
-NETEM_ARGS=delay\ 120ms\ 30ms\ distribution\ normal
-NETEM_DESCRIPTION=Delay\ 120ms\ ±\ 30ms\ distribution\ normal
-NETEM_APPLIED=2025-12-12T18:09:47+0200
+NETEM_ARGS=delay\ 100ms\ 10ms\ distribution\ normal
+NETEM_DESCRIPTION=Delay\ 100ms\ ±\ 10ms\ distribution\ normal
+NETEM_APPLIED=2025-12-13T22:33:00+0200
 NETEM_INTERFACE=lo

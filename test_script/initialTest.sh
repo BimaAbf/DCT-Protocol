@@ -1,4 +1,10 @@
+#!/usr/bin/env bash
+
 set -euo pipefail
+
+log_step() {
+	printf '[%s] %s\n' "$(date '+%H:%M:%S')" "$1"
+}
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 PYTHON_BIN=${PYTHON_BIN:-python3}
@@ -37,11 +43,15 @@ fi
 CLIENT_COUNT=${#CLIENT_SEED_LIST[@]}
 declare -a CLIENT_SESSIONS=()
 
+
+log_step "Starting baseline test run"
+
 if [[ $EUID -ne 0 ]]; then
 	echo "This script must be run with sudo or as root so tcpdump can capture on lo." >&2
 	exit 1
 fi
 
+log_step "Checking required commands"
 for cmd in tmux tcpdump "$PYTHON_BIN"; do
 	if ! command -v "$cmd" >/dev/null 2>&1; then
 		echo "Required command '$cmd' was not found in PATH." >&2
@@ -78,6 +88,8 @@ RUN_ID=$(date +"%Y-%m-%d_%H-%M-%S")
 RUN_DIR="$SCRIPT_DIR/Test_$RUN_ID"
 mkdir -p "$RUN_DIR"
 
+log_step "Artifacts will be stored under $RUN_DIR"
+
 SERVER_LOG="$RUN_DIR/ServerTerminalOutput.txt"
 CLIENT_LOG="$RUN_DIR/ClientTerminalOutput.txt"
 TCPDUMP_STDERR="$RUN_DIR/tcpdump.log"
@@ -104,15 +116,19 @@ cleanup() {
 
 trap cleanup EXIT
 
+log_step "Starting tcpdump capture -> $PCAP_FILE"
 tcpdump -i lo -s 0 -w "$PCAP_FILE" >/dev/null 2>"$TCPDUMP_STDERR" &
 TCPDUMP_PID=$!
 
+log_step "Launching server session"
 tmux new-session -d -s server_session
 tmux pipe-pane -o -t server_session "cat >> '$SERVER_LOG'"
 tmux send-keys -t server_session "cd '$SERVER_DIR'" C-m
 tmux send-keys -t server_session "exec $PYTHON_BIN main.py" C-m
 
 sleep 1
+
+log_step "Starting $CLIENT_COUNT client session(s)"
 
 for idx in "${!CLIENT_SEED_LIST[@]}"; do
 
@@ -139,6 +155,7 @@ for idx in "${!CLIENT_SEED_LIST[@]}"; do
 	sleep 0.5
 done
 
+log_step "Awaiting client completion"
 while :; do
 
 	active=0
@@ -160,6 +177,7 @@ while :; do
 
 done
 
+log_step "Aggregating client terminal output"
 {
 	for idx in "${!CLIENT_SEED_LIST[@]}"; do
 
@@ -176,8 +194,20 @@ done
 
 } >"$CLIENT_LOG"
 
+if tmux has-session -t server_session 2>/dev/null; then
+	log_step "Stopping server session"
+	tmux send-keys -t server_session C-c
+	for _ in $(seq 1 30); do
+		if ! tmux has-session -t server_session 2>/dev/null; then
+			break
+		fi
+		sleep 1
+	done
+fi
+
 METRICS_SCRIPT="$SCRIPT_DIR/../Analysis/metrics.py"
 if [[ -f "$METRICS_SCRIPT" ]]; then
+	log_step "Running metrics extractor"
 	if ! "$PYTHON_BIN" "$METRICS_SCRIPT" --output "$RUN_DIR/metrics.csv"; then
 		echo "Metric extraction failed" >&2
 	fi
@@ -185,7 +215,26 @@ else
 	echo "Warning: metrics script not found at $METRICS_SCRIPT" >&2
 fi
 
+ANALYSIS_SCRIPT="$SCRIPT_DIR/../Analysis/Analysis.py"
+if [[ -f "$ANALYSIS_SCRIPT" ]]; then
+	ANALYSIS_STDOUT="$RUN_DIR/analysis_console.txt"
+	log_step "Running analysis script"
+	if "$PYTHON_BIN" "$ANALYSIS_SCRIPT" | tee "$ANALYSIS_STDOUT"; then
+		latest_csv=$(ls -1t "$SCRIPT_DIR/../Analysis"/analysis_output_*.csv 2>/dev/null | head -n1 || true)
+		if [[ -n "$latest_csv" && -f "$latest_csv" ]]; then
+			log_step "Copying analysis CSV $(basename "$latest_csv")"
+			cp "$latest_csv" "$RUN_DIR/"
+		else
+			echo "Warning: analysis CSV not found after running analysis script." >&2
+		fi
+	else
+		echo "Analysis script failed" >&2
+	fi
+else
+	echo "Warning: analysis script not found at $ANALYSIS_SCRIPT" >&2
+fi
+
 cleanup
 trap - EXIT
 
-echo "Logs saved under $RUN_DIR"
+log_step "Logs saved under $RUN_DIR"
