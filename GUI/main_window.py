@@ -25,11 +25,11 @@ class MainWindow(QMainWindow):
         self.resize(1300, 700)
         self.setMinimumSize(QSize(1300, 600))
         
-        ###### remove this section ######################
-        screens = QGuiApplication.screens()
-        geometry = screens[1].availableGeometry()
-        self.move(geometry.x() + (geometry.width() - 1300) // 2, geometry.y() + (geometry.height() - 700) // 2)
-        #################################################
+        # ###### remove this section ######################
+        # screens = QGuiApplication.screens()
+        # geometry = screens[1].availableGeometry()
+        # self.move(geometry.x() + (geometry.width() - 1300) // 2, geometry.y() + (geometry.height() - 700) // 2)
+        # #################################################
         
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
