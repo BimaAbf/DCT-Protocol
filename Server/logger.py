@@ -53,7 +53,7 @@ class Logger:
                     'delayed': 1 if is_delayed else 0,
                     'cpu_time_ms': cpu_ms,
                     'packet_size': packet_size,
-                    'batch_index': batch_index,
+                    'batch_index': batch_index
                 }
                 self.registry[
                     (device_id, seq_num, batch_index)] = record_line
