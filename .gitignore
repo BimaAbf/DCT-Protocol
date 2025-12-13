@@ -215,3 +215,4 @@ Server/__*
 Server/logs
 Client/logs
 Analysis/figures
+logs/

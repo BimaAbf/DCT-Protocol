@@ -112,7 +112,7 @@ class LogsController(QObject):
                     
                     if arrival_time and timestamp:
                         latency = (arrival_time - timestamp).total_seconds() * 1000
-                        if 0 <= latency < 60000: 
+                        if 0 <= latency < 10000: 
                             device_data["lats"].append(latency)
                     
                     if row.get("packet_size"):

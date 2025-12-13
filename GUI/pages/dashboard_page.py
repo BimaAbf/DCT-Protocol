@@ -263,35 +263,28 @@ class DashboardPage(QWidget):
                 elif item.text() != text:
                     item.setText(text)
             
-            widget = table.cellWidget(row, 5)
-            if not widget:
-                widget = QWidget()
-                h_layout = QHBoxLayout(widget)
-                h_layout.setContentsMargins(0, 0, 0, 0)
-                h_layout.setSpacing(6)
-                
-                dot = QLabel(objectName="StatusDot")
-                dot.setFixedSize(10, 10)
-                text_label = QLabel(objectName="StatusText")
-                
-                h_layout.addWidget(dot)
-                h_layout.addWidget(text_label)
-                table.setCellWidget(row, 5, widget)
+            # Status column - use simple text item with color
+            is_online = client.get("is_online", False)
             
-            dot = widget.findChild(QLabel, "StatusDot")
-            text_label = widget.findChild(QLabel, "StatusText")
-            
-            if duplicates == 0 and gaps == 0:
-                dot.setStyleSheet("background:#10B981;border-radius:5px")
-                text_label.setText("Good")
-                text_label.setStyleSheet("color:#10B981")
-            elif duplicates > 0:
-                dot.setStyleSheet("background:#F59E0B;border-radius:5px")
-                text_label.setText(f"{duplicates} Dups")
-                text_label.setStyleSheet("color:#F59E0B")
+            if not is_online:
+                status_text = "● Offline"
+                status_color = QColor("#94A3B8")
+            elif duplicates == 0 and gaps == 0:
+                status_text = "● Online"
+                status_color = QColor("#10B981")
+            elif gaps > 0:
+                status_text = f"● {gaps} Lost"
+                status_color = QColor("#EF4444")
             else:
-                dot.setStyleSheet("background:#EF4444;border-radius:5px")
-                text_label.setText("Loss")
-                text_label.setStyleSheet("color:#EF4444")
+                status_text = f"● {duplicates} Dups"
+                status_color = QColor("#F59E0B")
+            
+            status_item = table.item(row, 5)
+            if not status_item:
+                status_item = QTableWidgetItem(status_text)
+                table.setItem(row, 5, status_item)
+            else:
+                status_item.setText(status_text)
+            status_item.setForeground(status_color)
                 
         self.lbl_connections.setText(str(len(clients)))

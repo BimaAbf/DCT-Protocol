@@ -12,6 +12,9 @@ class ClientsController(QObject):
         self.clients = []
         self.logs_controller = logs_controller
         self.processes = []
+        self.session_start_time = datetime.datetime.now()  # Track when GUI started
+        self.client_configs = []  # Store client configurations in order added
+        self.assigned_configs = set()  # Track which configs have been assigned
         
         self.base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         self.script_path = os.path.join(self.base_dir, "Client", "main.py")
@@ -22,6 +25,17 @@ class ClientsController(QObject):
         
         self.refresh()
 
+    def _get_config_for_device(self, device_id):
+        """Try to find a config for this device_id based on order"""
+        # Convert device_id to index (device_id 1 -> index 0)
+        try:
+            idx = int(device_id) - 1
+            if 0 <= idx < len(self.client_configs):
+                return self.client_configs[idx]
+        except (ValueError, TypeError):
+            pass
+        return {}
+
     def refresh(self):
         now = datetime.datetime.now()
         device_ids = self.logs_controller.get_device_ids() if self.logs_controller else []
@@ -29,11 +43,18 @@ class ClientsController(QObject):
         
         for device_id in device_ids:
             metrics = self.logs_controller.get_device_metrics(device_id)
-            last_seen = metrics.get("last_seen") or now
+            last_seen = metrics.get("last_seen")
             
-            is_online = False
-            if isinstance(last_seen, datetime.datetime):
-                is_online = (now - last_seen).total_seconds() < 30
+            # Skip clients that haven't been seen since GUI started
+            if not last_seen or not isinstance(last_seen, datetime.datetime):
+                continue
+            if last_seen < self.session_start_time:
+                continue
+            
+            is_online = (now - last_seen).total_seconds() < 30
+            
+            # Get stored config for this device (based on device_id order)
+            config = self._get_config_for_device(device_id)
             
             self.clients.append({
                 "device_id": device_id,
@@ -43,8 +64,16 @@ class ClientsController(QObject):
                 "avg_latency": metrics.get("avg_latency"),
                 "avg_cpu": metrics.get("avg_cpu"),
                 "avg_packet_size": metrics.get("avg_packet_size"),
-                "last_seen": last_seen.strftime("%H:%M:%S") if isinstance(last_seen, datetime.datetime) else str(last_seen),
-                "is_online": is_online
+                "last_seen": last_seen.strftime("%H:%M:%S"),
+                "is_online": is_online,
+                # Include stored config data
+                "mac": config.get("mac"),
+                "server_ip": config.get("ip"),
+                "port": config.get("port"),
+                "interval": config.get("interval"),
+                "duration": config.get("duration"),
+                "batch_size": config.get("batch_size"),
+                "delta_thresh": config.get("delta"),
             })
             
         self.clientsUpdated.emit(self.clients)
@@ -53,6 +82,22 @@ class ClientsController(QObject):
         return list(self.clients)
 
     def add_client(self, data):
+        # batch_size: 1 = no batching, >1 = batching enabled with that size
+        batch_size = str(data.get("batch_size", "1"))
+        seed = str(data.get("seed", 100))
+        
+        # Store client config in order (will be matched to device_id later)
+        self.client_configs.append({
+            "ip": data.get("ip", "127.0.0.1"),
+            "port": data.get("port", "5000"),
+            "interval": data.get("interval", "1.0"),
+            "duration": data.get("duration", "60"),
+            "mac": data.get("mac", "00:00:00:00:00:00"),
+            "seed": seed,
+            "delta": data.get("delta", "5"),
+            "batch_size": batch_size,
+        })
+        
         args = [
             self.script_path,
             data.get("ip", "127.0.0.1"),
@@ -60,9 +105,9 @@ class ClientsController(QObject):
             "--interval", str(data.get("interval", 1.0)),
             "--duration", str(data.get("duration", 60)),
             "--mac", str(data.get("mac", "00:00:00:00:00:00")),
-            "--seed", str(data.get("seed", 100)),
+            "--seed", seed,
             "--delta-thresh", str(data.get("delta", 5)),
-            "--batching", "5" if data.get("batching") == "Enabled" else "1"
+            "--batching", batch_size
         ]
         
         process = QProcess()

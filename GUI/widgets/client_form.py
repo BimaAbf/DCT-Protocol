@@ -55,11 +55,11 @@ class ClientFormDialog(QDialog):
             ("ip", "IP Address :", default_host),
             ("interval", "Interval :", "1.0"),
             ("port", "Port :", default_port),
-            ("batching", "Batching :", ["Disabled", "Enabled"]),
+            ("batch_size", "Batch Size :", "1"),
             ("mac", "MAC Address :", "00:00:00:00:00:00"),
-            ("delta", "Delta Thresh :", "1"),
-            ("duration", "Duration :", "100"),
-            ("seed", "Seed :", "32")
+            ("delta", "Delta Thresh :", "5"),
+            ("duration", "Duration :", "60"),
+            ("seed", "Seed :", "100")
         ]
         
         for i in range(0, len(fields), 2):

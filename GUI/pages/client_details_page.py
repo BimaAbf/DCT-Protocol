@@ -123,12 +123,19 @@ class ClientDetailsPage(QWidget):
         self.title_label.setText(f"Client: {client_data.get('device_id', 'Unknown')}")
         self._clear_layout(self.info_grid)
         
+        # Format batching display
+        batch_size = client_data.get("batch_size", "1")
+        if batch_size and str(batch_size) != "1":
+            batching_text = f"Enabled (size: {batch_size})"
+        else:
+            batching_text = "Disabled"
+        
         self._add_info_item("MAC Address", client_data.get("mac") or "Unknown", 0, 0)
-        self._add_info_item("Target Server", f"{client_data.get('server_ip', '127.0.0.1')}:{client_data.get('port', '5000')}", 0, 1)
-        self._add_info_item("Interval", f"{client_data.get('interval', '1.0')}s", 0, 2)
-        self._add_info_item("Batching", "Enabled" if client_data.get("batching") else "Disabled", 1, 0)
-        self._add_info_item("Delta Threshold", str(client_data.get("delta_thresh", 5)), 1, 1)
-        self._add_info_item("Last Seen", str(client_data.get("last_seen", "-")), 1, 2)
+        self._add_info_item("Target Server", f"{client_data.get('server_ip') or '127.0.0.1'}:{client_data.get('port') or '5000'}", 0, 1)
+        self._add_info_item("Interval", f"{client_data.get('interval') or '-'}s" if client_data.get('interval') else "-", 0, 2)
+        self._add_info_item("Batching", batching_text, 1, 0)
+        self._add_info_item("Duration", f"{client_data.get('duration') or '-'}s" if client_data.get('duration') else "-", 1, 1)
+        self._add_info_item("Delta Threshold", str(client_data.get("delta_thresh") or "-"), 1, 2)
         
         self._clear_layout(self.stats_grid)
         self._add_stat_card(0, 0, "Packets Sent", str(client_data.get('packets_sent', 0)))

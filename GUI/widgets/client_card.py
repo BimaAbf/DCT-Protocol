@@ -79,11 +79,12 @@ class ClientCard(QWidget):
         grid.setContentsMargins(0, 8, 0, 0)
         
         self.labels = {}
+        # Only show data that's actually available from server logs
         stats = [
-            ("server_ip", "Server IP:", 0, 0), ("port", "Port:", 0, 1),
-            ("interval", "Interval:", 0, 2), ("batching", "Batching:", 0, 3),
-            ("mac", "MAC Address:", 1, 0), ("last_seen", "Last Activity:", 1, 1),
-            ("duplicates", "Duplicates:", 1, 2)
+            ("device_id", "Device ID:", 0, 0), ("last_seen", "Last Activity:", 0, 1),
+            ("duplicates", "Duplicates:", 0, 2), ("gaps", "Gaps:", 0, 3),
+            ("avg_latency", "Avg Latency:", 1, 0), ("avg_cpu", "Avg CPU:", 1, 1),
+            ("avg_packet_size", "Avg Packet Size:", 1, 2)
         ]
 
         for key, text, r, c in stats:
@@ -112,7 +113,7 @@ class ClientCard(QWidget):
 
     def update_data(self, client: Dict[str, Any], position: int | None = None):
         self.client_data = client
-        self.device_label.setText(f"Client {position + 1}" if position is not None else (client.get("device_id") or client.get("name") or "Unknown"))
+        self.device_label.setText(f"Client {position + 1}" if position is not None else f"Client {client.get('device_id', 'Unknown')}")
         
         is_online = client.get("is_online", False)
         if is_online:
@@ -127,22 +128,26 @@ class ClientCard(QWidget):
         pkts = client.get("packets_sent") if client.get("packets_sent") is not None else client.get("packets", 0)
         self.packet_summary.setText(f"{pkts} packet{'s' if pkts != 1 else ''}")
 
-        self.labels["server_ip"].setText(self._val(client, "ip", "ip_address", "server_ip", default="127.0.0.1"))
-        self.labels["port"].setText(str(client.get("port") or client.get("server_port") or 0))
+        # Update labels with actual data from server logs
+        self.labels["device_id"].setText(str(client.get("device_id", "-")))
+        self.labels["last_seen"].setText(client.get("last_seen") or "-")
+        self.labels["duplicates"].setText(str(client.get("duplicates", 0)))
+        self.labels["gaps"].setText(str(client.get("gaps", 0)))
         
-        batching = client.get("batching") if client.get("batching") is not None else client.get("batching_enabled")
-        self.labels["batching"].setText("Enabled" if batching in (True, "Enabled", 1) else "Disabled")
-
-        self.labels["mac"].setText(self._val(client, "mac", "mac_address", default="00:00:00:00:00:00"))
-        self.labels["last_seen"].setText(client.get("last_seen") or client.get("last_activity") or "-")
+        avg_lat = client.get("avg_latency")
+        self.labels["avg_latency"].setText(f"{avg_lat:.2f}ms" if avg_lat is not None else "-")
         
-        interval = client.get("interval") or client.get("send_interval")
-        self.labels["interval"].setText(f"{interval}s" if interval else "-")
+        avg_cpu = client.get("avg_cpu")
+        self.labels["avg_cpu"].setText(f"{avg_cpu:.3f}ms" if avg_cpu is not None else "-")
+        
+        avg_size = client.get("avg_packet_size")
+        self.labels["avg_packet_size"].setText(f"{avg_size:.1f}B" if avg_size is not None else "-")
 
+        # Color based on duplicates and gaps
         dup = client.get("duplicates", 0)
-        self.labels["duplicates"].setText(str(dup))
-
-        color = "#10B981" if dup == 0 else "#F59E0B" if dup <= 2 else "#EF4444"
+        gaps = client.get("gaps", 0)
+        issues = dup + gaps
+        color = "#10B981" if issues == 0 else "#F59E0B" if issues <= 2 else "#EF4444"
         self.status_bar.setStyleSheet(f"background-color: {color}; border-radius: 40px;")
 
     def _val(self, data: Dict, *keys: str, default: str = "-") :
