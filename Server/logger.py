@@ -57,7 +57,7 @@ class Logger:
                 }
                 self.registry[
                     (device_id, seq_num, batch_index)] = record_line
-                # self._rewrite_sheet()
+                self._rewrite_sheet()
             except IOError as e:
                 console.log.red(f"[CSV Error] Failed to write to CSV file. {e}")
 

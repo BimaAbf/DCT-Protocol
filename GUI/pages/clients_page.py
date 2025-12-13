@@ -18,7 +18,6 @@ class ClientsPage(QWidget):
         self.main_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.main_scroll.setWidgetResizable(True)
         self.main_scroll.setFrameShape(QFrame.NoFrame)
-        self.main_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         root.addWidget(self.main_scroll)
 
         content = QWidget(objectName="ClientsContent")
@@ -38,7 +37,6 @@ class ClientsPage(QWidget):
         controls = QHBoxLayout()
         controls.addWidget(QLabel(" Client Devices", objectName="ClientsSectionTag"))
         controls.addStretch(1)
-        
         self.add_btn = QPushButton("Add Client")
         self.add_btn.setFixedSize(130, 38)
         self.add_btn.clicked.connect(self._add_client)
@@ -65,49 +63,36 @@ class ClientsPage(QWidget):
         self.controller.clientsUpdated.connect(self._render)
         if self.logs: self.logs.logsUpdated.connect(lambda _: self.controller.refresh())
         self._render(self.controller.get_clients())
-
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.controller.refresh)
         self.timer.start(30000)
 
-    def _add_client(self) -> None:
+    def _add_client(self):
         dialog = ClientFormDialog(self)
-        if dialog.exec():
-            data = dialog.get_data()
-            self.controller.add_client(data)
+        if dialog.exec(): self.controller.add_client(dialog.get_data())
 
     def _render(self, clients: list):
         if self.cards_layout.count() and self.cards_layout.itemAt(self.cards_layout.count() - 1).spacerItem():
             self.cards_layout.removeItem(self.cards_layout.itemAt(self.cards_layout.count() - 1))
-
         for i, client in enumerate(clients):
-            device_id = client.get("device_id")
-            
+            did = client.get("device_id")
             if i < self.cards_layout.count():
-                widget = self.cards_layout.itemAt(i).widget()
-                if isinstance(widget, ClientCard):
-                    widget.update_data(client, position=i)
-                    widget.setVisible(True)
-                    try: widget.clicked.disconnect()
+                w = self.cards_layout.itemAt(i).widget()
+                if isinstance(w, ClientCard):
+                    w.update_data(client, position=i)
+                    w.setVisible(True)
+                    try: w.clicked.disconnect()
                     except: pass
-                    widget.clicked.connect(lambda _, did=device_id: self.controller.select_client(did))
+                    w.clicked.connect(lambda _, d=did: self.controller.select_client(d))
                     continue
-                if widget: 
-                    widget.deleteLater()
-                
-            new_card = ClientCard(client, position=i)
-            new_card.clicked.connect(lambda _, did=device_id: self.controller.select_client(did))
-            if i < self.cards_layout.count():
-                self.cards_layout.insertWidget(i, new_card)
-            else:
-                self.cards_layout.addWidget(new_card)
-
+                if w: w.deleteLater()
+            card = ClientCard(client, position=i)
+            card.clicked.connect(lambda _, d=did: self.controller.select_client(d))
+            if i < self.cards_layout.count(): self.cards_layout.insertWidget(i, card)
+            else: self.cards_layout.addWidget(card)
         while self.cards_layout.count() > len(clients):
-            if w := self.cards_layout.takeAt(len(clients)).widget(): 
-                w.deleteLater()
-
+            if w := self.cards_layout.takeAt(len(clients)).widget(): w.deleteLater()
         self.cards_layout.addStretch(1)
-
         if not clients and self.cards_layout.count() == 1:
             lbl = QLabel("No connected clients.", objectName="HelperLabel")
             lbl.setAlignment(Qt.AlignCenter)

@@ -12,7 +12,7 @@ class ClientCard(QWidget):
         self.setAttribute(Qt.WA_StyledBackground, True)
         self.setCursor(Qt.PointingHandCursor)
         self.client_data = {}
-        
+
         wrapper_layout = QVBoxLayout(self)
         wrapper_layout.setContentsMargins(5, 5, 5, 5)
         wrapper_layout.setSpacing(0)
@@ -44,30 +44,28 @@ class ClientCard(QWidget):
         content_layout = QVBoxLayout(content_widget)
         content_layout.setContentsMargins(24, 20, 24, 20)
         content_layout.setSpacing(12)
-        
+
         header_layout = QHBoxLayout()
         self.device_label = QLabel("Client")
         self.device_label.setObjectName("ClientName")
         header_layout.addWidget(self.device_label)
-        
-        # Online/Offline Indicator
+
         self.online_indicator = QWidget()
         layout_indicator = QHBoxLayout(self.online_indicator)
         layout_indicator.setContentsMargins(10, 0, 0, 0)
         layout_indicator.setSpacing(6)
-        
+
         self.online_dot = QLabel()
         self.online_dot.setFixedSize(8, 8)
         self.online_dot.setStyleSheet("background-color: #94A3B8; border-radius: 4px;")
-        
         self.online_text = QLabel("Offline")
         self.online_text.setStyleSheet("color: #94A3B8; font-size: 12px; font-weight: 500;")
         
         layout_indicator.addWidget(self.online_dot)
         layout_indicator.addWidget(self.online_text)
         header_layout.addWidget(self.online_indicator)
-
         header_layout.addStretch()
+
         self.packet_summary = QLabel("0 packets")
         self.packet_summary.setObjectName("ClientPackets")
         header_layout.addWidget(self.packet_summary)
@@ -77,9 +75,8 @@ class ClientCard(QWidget):
         grid.setHorizontalSpacing(30)
         grid.setVerticalSpacing(8)
         grid.setContentsMargins(0, 8, 0, 0)
-        
+
         self.labels = {}
-        # Only show data that's actually available from server logs
         stats = [
             ("device_id", "Device ID:", 0, 0), ("last_seen", "Last Activity:", 0, 1),
             ("duplicates", "Duplicates:", 0, 2), ("gaps", "Gaps:", 0, 3),
@@ -99,7 +96,7 @@ class ClientCard(QWidget):
             container.addStretch()
             grid.addLayout(container, r, c)
             self.labels[key] = val
-        
+
         content_layout.addLayout(grid)
         main_layout.addWidget(content_widget, 1)
 
@@ -124,33 +121,22 @@ class ClientCard(QWidget):
             self.online_dot.setStyleSheet("background-color: #94A3B8; border-radius: 4px;")
             self.online_text.setText("Offline")
             self.online_text.setStyleSheet("color: #94A3B8; font-size: 12px; font-weight: 500;")
-
+        
         pkts = client.get("packets_sent") if client.get("packets_sent") is not None else client.get("packets", 0)
         self.packet_summary.setText(f"{pkts} packet{'s' if pkts != 1 else ''}")
-
-        # Update labels with actual data from server logs
         self.labels["device_id"].setText(str(client.get("device_id", "-")))
         self.labels["last_seen"].setText(client.get("last_seen") or "-")
         self.labels["duplicates"].setText(str(client.get("duplicates", 0)))
         self.labels["gaps"].setText(str(client.get("gaps", 0)))
-        
+
         avg_lat = client.get("avg_latency")
         self.labels["avg_latency"].setText(f"{avg_lat:.2f}ms" if avg_lat is not None else "-")
-        
         avg_cpu = client.get("avg_cpu")
         self.labels["avg_cpu"].setText(f"{avg_cpu:.3f}ms" if avg_cpu is not None else "-")
-        
         avg_size = client.get("avg_packet_size")
         self.labels["avg_packet_size"].setText(f"{avg_size:.1f}B" if avg_size is not None else "-")
 
-        # Color based on duplicates and gaps
-        dup = client.get("duplicates", 0)
-        gaps = client.get("gaps", 0)
+        dup, gaps = client.get("duplicates", 0), client.get("gaps", 0)
         issues = dup + gaps
         color = "#10B981" if issues == 0 else "#F59E0B" if issues <= 2 else "#EF4444"
         self.status_bar.setStyleSheet(f"background-color: {color}; border-radius: 40px;")
-
-    def _val(self, data: Dict, *keys: str, default: str = "-") :
-        for k in keys:
-            if v := data.get(k): return str(v)
-        return default
