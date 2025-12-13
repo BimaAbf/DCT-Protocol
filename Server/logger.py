@@ -100,7 +100,7 @@ class Logger:
                 entry['gap'],
                 entry['delayed'],
                 entry['cpu_time_ms'],
-                entry['packet_size'].
+                entry['packet_size'],
                 entry['batch_index']
             ])
 
