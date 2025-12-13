@@ -165,12 +165,11 @@ class Client:
                     else:
                         delta = random.randint(-10 * self.delta_thresh, 10 * self.delta_thresh)
                         batch_value_change_counter += 1
-                        if abs(delta) > self.delta_thresh:
-                            self.current_value += delta
-                            if delta > 128 or delta < -127:
-                                batch_packets.append((offset, MSG_KEYFRAME, self.current_value))
-                            else:
-                                batch_packets.append((offset, MSG_DATA_DELTA, delta))
+                        self.current_value += delta
+                        if delta > 128 or delta < -127:
+                            batch_packets.append((offset, MSG_KEYFRAME, self.current_value))
+                        else:
+                            batch_packets.append((offset, MSG_DATA_DELTA, delta))
                         if time.time() - self.last_sent_time > self.interval * 5:
                             self._send_heartbeat()
                     if len(batch_packets) == self.batch_size:
