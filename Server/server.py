@@ -258,7 +258,7 @@ class Server:
             console.log.yellow(f"[Packet Error] Received batch packet from unknown DeviceID {deviceId} at {origin}. Discarding.")
             return
 
-        offset, delta_counter,keyframe_counter = 0,0,0
+        offset, delta_counter,keyframe_counter, batch_index = 0,0,0,1
         while offset < payloadLen:
 
             try:
@@ -270,9 +270,10 @@ class Server:
                     entryPayload = struct.pack('!h', value)
                     entryMeta = (deviceId, entryType, seqNum, entryOffset, payloadLen)
 
-                    self.trackTelemetry(entryMeta, entryPayload, origin, ingressTime, cpu_start)
+                    self.trackTelemetry(entryMeta, entryPayload, origin, ingressTime, cpu_start, batch_index)
                     offset += 5
                     keyframe_counter += 1
+                    batch_index += 1
 
                 elif entryType == MSG_DATA_DELTA:
 
@@ -280,9 +281,10 @@ class Server:
                     entryPayload = struct.pack('!b', value)
                     entryMeta = (deviceId, entryType, seqNum, entryOffset,payloadLen)
 
-                    self.trackTelemetry(entryMeta, entryPayload, origin, ingressTime, cpu_start)
+                    self.trackTelemetry(entryMeta, entryPayload, origin, ingressTime, cpu_start, batch_index)
                     offset += 4
                     delta_counter += 1
+                    batch_index += 1
 
                 else:
                     console.log.red(f"[Packet Error] Unknown message type {entryType} in batch from DeviceID {deviceId}. Skipping entry.")
@@ -295,7 +297,7 @@ class Server:
         console.log.blue(f"[BATCH] Processed batch from DeviceID {deviceId}: {keyframe_counter} keyframes, {delta_counter} deltas.")
 
 
-    def trackTelemetry(self, metaTuple: tuple, payload: bytes, origin: Tuple[str, int], ingressTime: float, cpu_start: float):
+    def trackTelemetry(self, metaTuple: tuple, payload: bytes, origin: Tuple[str, int], ingressTime: float, cpu_start: float,batch_index: int = 0):
 
         deviceId, msgType, seqNum, timestampOffset, payloadLen = metaTuple
 
@@ -337,14 +339,16 @@ class Server:
                 valueBe = int(struct.unpack('!h', payload)[0])
                 state['signal_value'] = valueBe
                 self.csvLogger.log_packet(msgType, deviceId, seqNum, fullTimestamp, ingressTime, valueBe,
-                                          duplicateFlag, gapFlag, delayedFlag, cpu_duration, HEADER_SIZE + payloadLen)
+                                          duplicateFlag, gapFlag, delayedFlag, cpu_duration, HEADER_SIZE + payloadLen,
+                                          batch_index)
             elif msgType == MSG_DATA_DELTA:
                 deltaVal = int(struct.unpack('!b', payload)[0])
                 oldValue = state['signal_value']
                 newValue = oldValue + deltaVal
                 state['signal_value'] = newValue
                 self.csvLogger.log_packet(msgType, deviceId, seqNum, fullTimestamp, ingressTime, newValue,
-                                          duplicateFlag, gapFlag,delayedFlag, cpu_duration, HEADER_SIZE + payloadLen)
+                                          duplicateFlag, gapFlag,delayedFlag, cpu_duration, HEADER_SIZE + payloadLen,
+                                          batch_index)
             elif msgType == MSG_HEARTBEAT:
                 console.log.blue(f"[HEARTBEAT] Liveness ping from DeviceID {deviceId}.")
                 if not state['batching']:
