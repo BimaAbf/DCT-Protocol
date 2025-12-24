@@ -2,6 +2,8 @@
 
 This repository contains the server, client, and automation scripts used to exercise the DCT protocol locally.
 
+(DEMO VIDEO HERE!)[https://drive.google.com/file/d/1eU5GgXh4rePaPaVkoH674pTVsD122iGa/view?usp=drive_link]
+
 ---
 
 ## 1. Build Instructions
