@@ -1,0 +1,1 @@
+msg_type,device_id,seq,timestamp,arrival_time,value,duplicate_flag,gap_flag,delayed_flag,cpu_time_ms,packet_size,batch_index

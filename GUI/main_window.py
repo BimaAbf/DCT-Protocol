@@ -80,5 +80,10 @@ class MainWindow(QMainWindow):
             button.setChecked(i == index)
 
     def closeEvent(self, event):
+        # Stop all clients
+        self.clients_controller.cleanup()
+        # Stop server
+        self.server_controller.stop()
+        # Clean up console
         self.console_controller.cleanup()
         super().closeEvent(event)

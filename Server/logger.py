@@ -28,6 +28,7 @@ class Logger:
             self.registry = {}
 
             self.sheet.writerow(self._heading)
+            self.binder.flush()  # Flush header immediately
 
             console.log.green(f"[Logger] CSV logging active. Writing to {storage_path}")
             return True
@@ -55,9 +56,31 @@ class Logger:
                     'packet_size': packet_size,
                     'batch_index': batch_index
                 }
-                self.registry[
-                    (device_id, seq_num, batch_index)] = record_line
-                # self._rewrite_sheet()
+                # Use arrival_time in key to allow logging duplicates as separate entries
+                if is_duplicate:
+                    key = (device_id, seq_num, batch_index, arrival_time)
+                else:
+                    key = (device_id, seq_num, batch_index, 0)
+                self.registry[key] = record_line
+                
+                # Write immediately to CSV for crash safety
+                readable_stamp = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(timestamp_s))
+                readable_arrival = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(arrival_time))
+                self.sheet.writerow([
+                    message_type,
+                    device_id,
+                    seq_num,
+                    readable_stamp,
+                    readable_arrival,
+                    value,
+                    1 if is_duplicate else 0,
+                    1 if is_gap else 0,
+                    1 if is_delayed else 0,
+                    cpu_ms,
+                    packet_size,
+                    batch_index
+                ])
+                self.binder.flush()  # Ensure data is written to disk immediately
             except IOError as e:
                 console.log.red(f"[CSV Error] Failed to write to CSV file. {e}")
 

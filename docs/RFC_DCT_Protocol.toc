@@ -1,0 +1,48 @@
+\contentsline {section}{\numberline {1}Introduction}{4}{section.1}%
+\contentsline {subsection}{\numberline {1.1}Purpose}{4}{subsection.1.1}%
+\contentsline {subsection}{\numberline {1.2}Scope}{4}{subsection.1.2}%
+\contentsline {subsection}{\numberline {1.3}Terminology}{4}{subsection.1.3}%
+\contentsline {section}{\numberline {2}Protocol Overview}{5}{section.2}%
+\contentsline {subsection}{\numberline {2.1}Transport}{5}{subsection.2.1}%
+\contentsline {subsection}{\numberline {2.2}Byte Order}{5}{subsection.2.2}%
+\contentsline {subsection}{\numberline {2.3}Session Model}{5}{subsection.2.3}%
+\contentsline {section}{\numberline {3}Message Format}{5}{section.3}%
+\contentsline {subsection}{\numberline {3.1}Common Header}{5}{subsection.3.1}%
+\contentsline {subsubsection}{\numberline {3.1.1}Version/Type Field (1 byte)}{5}{subsubsection.3.1.1}%
+\contentsline {subsubsection}{\numberline {3.1.2}Device ID (2 bytes)}{5}{subsubsection.3.1.2}%
+\contentsline {subsubsection}{\numberline {3.1.3}Sequence Number (2 bytes)}{5}{subsubsection.3.1.3}%
+\contentsline {subsubsection}{\numberline {3.1.4}Time Offset (2 bytes)}{6}{subsubsection.3.1.4}%
+\contentsline {subsubsection}{\numberline {3.1.5}Payload Length (1 byte)}{6}{subsubsection.3.1.5}%
+\contentsline {subsection}{\numberline {3.2}Struct Format}{6}{subsection.3.2}%
+\contentsline {section}{\numberline {4}Message Types}{6}{section.4}%
+\contentsline {subsection}{\numberline {4.1}MSG\_STARTUP (0x01)}{6}{subsection.4.1}%
+\contentsline {subsection}{\numberline {4.2}MSG\_STARTUP\_ACK (0x02)}{7}{subsection.4.2}%
+\contentsline {subsection}{\numberline {4.3}MSG\_TIME\_SYNC (0x03)}{7}{subsection.4.3}%
+\contentsline {subsection}{\numberline {4.4}MSG\_KEYFRAME (0x04)}{7}{subsection.4.4}%
+\contentsline {subsection}{\numberline {4.5}MSG\_DATA\_DELTA (0x05)}{8}{subsection.4.5}%
+\contentsline {subsection}{\numberline {4.6}MSG\_HEARTBEAT (0x06)}{8}{subsection.4.6}%
+\contentsline {subsection}{\numberline {4.7}MSG\_BATCHED\_DATA (0x07)}{8}{subsection.4.7}%
+\contentsline {subsection}{\numberline {4.8}MSG\_SHUTDOWN (0x0B)}{9}{subsection.4.8}%
+\contentsline {section}{\numberline {5}Connection Lifecycle}{9}{section.5}%
+\contentsline {subsection}{\numberline {5.1}Registration}{9}{subsection.5.1}%
+\contentsline {subsection}{\numberline {5.2}Data Transmission}{9}{subsection.5.2}%
+\contentsline {subsection}{\numberline {5.3}Session Termination}{10}{subsection.5.3}%
+\contentsline {section}{\numberline {6}Sequence Number Handling}{10}{section.6}%
+\contentsline {subsection}{\numberline {6.1}Wraparound}{10}{subsection.6.1}%
+\contentsline {subsection}{\numberline {6.2}Gap Detection}{10}{subsection.6.2}%
+\contentsline {subsection}{\numberline {6.3}Duplicate Detection}{10}{subsection.6.3}%
+\contentsline {section}{\numberline {7}Time Synchronization}{10}{section.7}%
+\contentsline {subsection}{\numberline {7.1}Base Time}{10}{subsection.7.1}%
+\contentsline {subsection}{\numberline {7.2}Re-synchronization}{11}{subsection.7.2}%
+\contentsline {section}{\numberline {8}Error Detection}{11}{section.8}%
+\contentsline {subsection}{\numberline {8.1}Packet Classification}{11}{subsection.8.1}%
+\contentsline {subsection}{\numberline {8.2}Recovery Strategies}{11}{subsection.8.2}%
+\contentsline {section}{\numberline {9}Security Considerations}{11}{section.9}%
+\contentsline {subsection}{\numberline {9.1}Current Limitations}{11}{subsection.9.1}%
+\contentsline {subsection}{\numberline {9.2}Deployment Recommendations}{11}{subsection.9.2}%
+\contentsline {section}{\numberline {10}IANA Considerations}{12}{section.10}%
+\contentsline {section}{\numberline {A}Message Type Quick Reference}{12}{appendix.A}%
+\contentsline {section}{\numberline {B}Example Message Captures}{12}{appendix.B}%
+\contentsline {subsection}{\numberline {B.1}STARTUP Message}{12}{subsection.B.1}%
+\contentsline {subsection}{\numberline {B.2}KEYFRAME Message}{12}{subsection.B.2}%
+\contentsline {subsection}{\numberline {B.3}DATA\_DELTA Message}{12}{subsection.B.3}%

@@ -137,7 +137,16 @@ class Server:
                 deviceProfile['status'] = DeviceStatus.DOWN
                 deviceProfile['last_seen'] = time.time()
                 deviceProfile['current_seq'] += 1
-            console.log.blue(f"[SHUTDOWN] Received SHUTDOWN from DeviceID {deviceId} at {origin}. Ignoring.")
+                # Log the shutdown packet with a dummy signal value (-1) as end-of-stream marker
+                cpu_duration = time.perf_counter() - cpu_start
+                baseTime = deviceProfile.get('base_time', 0)
+                fullTimestamp = baseTime + timestampOffset
+                try:
+                    self.csvLogger.log_packet(MSG_SHUTDOWN, deviceId, seqNum, fullTimestamp, ingressTime, -1,
+                                              False, False, False, cpu_duration, HEADER_SIZE)
+                except IOError as e:
+                    console.log.red(f"[CSV Error] Failed to log SHUTDOWN packet: {e}")
+            console.log.blue(f"[SHUTDOWN] Received SHUTDOWN from DeviceID {deviceId} at {origin}. Logged.")
         
         elif msgType == MSG_BATCHED_DATA:
             self.BatchTelemetry((deviceId, msgType, seqNum, payloadLen), bodyBlob, origin, ingressTime, cpu_start)
@@ -314,6 +323,25 @@ class Server:
 
 
         if duplicateFlag:
+            # Log the duplicate packet to CSV before returning
+            cpu_duration = time.perf_counter() - cpu_start
+            try:
+                if msgType == MSG_KEYFRAME:
+                    valueBe = int(struct.unpack('!h', payload)[0])
+                    self.csvLogger.log_packet(msgType, deviceId, seqNum, fullTimestamp, ingressTime, valueBe,
+                                              duplicateFlag, False, False, cpu_duration, HEADER_SIZE + payloadLen,
+                                              batch_index)
+                elif msgType == MSG_DATA_DELTA:
+                    deltaVal = int(struct.unpack('!b', payload)[0])
+                    self.csvLogger.log_packet(msgType, deviceId, seqNum, fullTimestamp, ingressTime, state['signal_value'],
+                                              duplicateFlag, False, False, cpu_duration, HEADER_SIZE + payloadLen,
+                                              batch_index)
+                else:
+                    self.csvLogger.log_packet(msgType, deviceId, seqNum, fullTimestamp, ingressTime, state['signal_value'],
+                                              duplicateFlag, False, False, cpu_duration, HEADER_SIZE + payloadLen,
+                                              batch_index)
+            except (struct.error, IOError) as e:
+                console.log.red(f"[CSV Error] Failed to log duplicate packet: {e}")
             return
 
         priorActivity = state.get('last_activity')

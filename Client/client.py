@@ -151,12 +151,18 @@ class Client:
         self.current_value = random.randint(400, 600)
         self._send_keyframe()
         console.log.green(f"--- Client running for {self.duration} seconds ---")
+        
+        # Calculate exact number of packets to send to avoid floating-point timing issues
+        total_packets_to_send = int(self.duration / self.interval)
+        packets_sent = 0
+        
         try:
-            while self.running and (time.time() - start_time) < self.duration:
+            while self.running and packets_sent < total_packets_to_send:
                 sleep_time = next_interval_time - time.time()
                 if sleep_time > 0:
                     time.sleep(sleep_time)
                 next_interval_time += self.interval
+                packets_sent += 1
                 if self.batching:
                     offset = int(time.time() - self.base_time) % 65536
                     if batch_value_change_counter >= 10:

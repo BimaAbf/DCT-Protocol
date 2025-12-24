@@ -11,7 +11,7 @@ class ConsoleWidget(QTextEdit):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setPlaceholderText("PowerShell Console...")
+        self.setPlaceholderText("Shell Console...")
         self.setMinimumHeight(320)
         self.prompt = ""
         self.history = []
@@ -229,32 +229,65 @@ class ConsolePage(QWidget):
 
     def _open_terminal(self):
         """Open external terminal in project directory"""
+        import platform
         base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         
         try:
-            # Try Windows Terminal first
-            subprocess.Popen(["wt", "-d", base_dir])
+            if platform.system() == "Windows":
+                # Try Windows Terminal first
+                subprocess.Popen(["wt", "-d", base_dir])
+            else:
+                # Linux - try common terminals
+                terminals = [
+                    ["gnome-terminal", "--working-directory", base_dir],
+                    ["konsole", "--workdir", base_dir],
+                    ["xfce4-terminal", "--working-directory", base_dir],
+                    ["xterm", "-e", f"cd {base_dir} && bash"],
+                ]
+                for cmd in terminals:
+                    try:
+                        subprocess.Popen(cmd)
+                        return
+                    except FileNotFoundError:
+                        continue
+                self.console_widget.append_output("\n[Error] No terminal emulator found\n")
         except FileNotFoundError:
             try:
-                # Fallback: open PowerShell directly
-                subprocess.Popen(["powershell", "-NoExit", "-Command", f"cd '{base_dir}'"])
+                if platform.system() == "Windows":
+                    # Fallback: open PowerShell directly
+                    subprocess.Popen(["powershell", "-NoExit", "-Command", f"cd '{base_dir}'"])
+                else:
+                    subprocess.Popen(["xterm", "-e", f"cd {base_dir} && bash"])
             except Exception as e:
                 self.console_widget.append_output(f"\n[Error] Could not open terminal: {e}\n")
 
     def _open_tmux(self):
-        """Open WSL with tmux in project directory"""
+        """Open terminal with tmux in project directory"""
+        import platform
         base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-        drive = base_dir[0].lower()
-        wsl_path = f"/mnt/{drive}" + base_dir[2:].replace("\\", "/")
         
         try:
-            # Open Windows Terminal with WSL, cd to project, start tmux
-            subprocess.Popen(["wt", "wsl", "--cd", wsl_path, "-e", "bash", "-c", "tmux new -A -s dct"])
-        except FileNotFoundError:
-            try:
-                subprocess.Popen(["wsl", "--cd", wsl_path, "-e", "bash", "-c", "tmux new -A -s dct"])
-            except Exception as e:
-                self.console_widget.append_output(f"\n[Error] Could not open tmux: {e}\n")
+            if platform.system() == "Windows":
+                # Windows: use WSL
+                drive = base_dir[0].lower()
+                wsl_path = f"/mnt/{drive}" + base_dir[2:].replace("\\", "/")
+                subprocess.Popen(["wt", "wsl", "--cd", wsl_path, "-e", "bash", "-c", "tmux new -A -s dct"])
+            else:
+                # Linux: open terminal with tmux
+                terminals = [
+                    ["gnome-terminal", "--", "bash", "-c", f"cd '{base_dir}' && tmux new -A -s dct"],
+                    ["konsole", "-e", f"bash -c 'cd {base_dir} && tmux new -A -s dct'"],
+                    ["xterm", "-e", f"cd {base_dir} && tmux new -A -s dct"],
+                ]
+                for cmd in terminals:
+                    try:
+                        subprocess.Popen(cmd)
+                        return
+                    except FileNotFoundError:
+                        continue
+                self.console_widget.append_output("\n[Error] No terminal emulator found\n")
+        except FileNotFoundError as e:
+            self.console_widget.append_output(f"\n[Error] Could not open tmux: {e}\n")
 
     def _restart_terminal(self):
         """Restart the terminal"""

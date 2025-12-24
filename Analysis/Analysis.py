@@ -29,6 +29,7 @@ MSG_TIME_SYNC = 0x03
 MSG_KEYFRAME = 0x04
 MSG_DATA_DELTA = 0x05
 MSG_HEARTBEAT = 0x06
+MSG_SHUTDOWN = 0x0B
 
 MESSAGE_NAMES = {
     MSG_STARTUP: "MSG_STARTUP",
@@ -36,6 +37,7 @@ MESSAGE_NAMES = {
     MSG_KEYFRAME: "MSG_KEYFRAME",
     MSG_DATA_DELTA: "MSG_DATA_DELTA",
     MSG_HEARTBEAT: "MSG_HEARTBEAT",
+    MSG_SHUTDOWN: "MSG_SHUTDOWN",
 }
 
 TYPE_SHORT_NAMES = {
@@ -44,6 +46,7 @@ TYPE_SHORT_NAMES = {
     MSG_KEYFRAME: "keyframe",
     MSG_DATA_DELTA: "data_delta",
     MSG_HEARTBEAT: "heartbeat",
+    MSG_SHUTDOWN: "shutdown",
 }
 
 EXPECTED_MSG_TYPES = list(MESSAGE_NAMES.keys())
@@ -52,13 +55,28 @@ DEFAULT_DELTA_THRESHOLD = 5
 
 def _latest_log(paths: Iterable[Path]) -> Path:
     try:
-        return max(paths, key=lambda entry: entry.stat().st_mtime)
+        # Filter out empty files and get the latest non-empty log
+        non_empty_paths = [p for p in paths if p.stat().st_size > 0]
+        if not non_empty_paths:
+            raise FileNotFoundError("No non-empty server_log_*.csv files found in Server/logs/")
+        return max(non_empty_paths, key=lambda entry: entry.stat().st_mtime)
     except ValueError as exc:  # pragma: no cover - defensive
         raise FileNotFoundError("No server_log_*.csv files found in Server/logs/") from exc
 
 
 def _load_dataset(path: Path) -> pd.DataFrame:
-    frame = pd.read_csv(path)
+    # Check if file is empty before trying to parse
+    if path.stat().st_size == 0:
+        raise ValueError(f"CSV {path.name} is empty. No data to analyze. Run a test first.")
+    
+    try:
+        frame = pd.read_csv(path)
+    except pd.errors.EmptyDataError:
+        raise ValueError(f"CSV {path.name} is empty or has no valid data. Run a test first.")
+    
+    if frame.empty:
+        raise ValueError(f"CSV {path.name} contains no data rows. Run a test first.")
+    
     missing = EXPECTED_COLUMNS.difference(frame.columns)
     if missing:
         raise ValueError(f"CSV {path.name} missing columns: {sorted(missing)}")
@@ -171,7 +189,22 @@ def _expected_counts_for_device(group: pd.DataFrame) -> tuple[dict[int, int], di
     if max_seq.empty:
         return ({msg: 0 for msg in EXPECTED_MSG_TYPES}, {"total_expected": 0, "delta_threshold": DEFAULT_DELTA_THRESHOLD})
 
-    total_expected = int(max_seq.max()) + 1
+    # Check if a MSG_SHUTDOWN packet exists for this device
+    shutdown_packets = group[group["msg_type"] == MSG_SHUTDOWN]
+    if not shutdown_packets.empty:
+        # Use the shutdown packet's sequence number as the definitive total expected count
+        shutdown_seq = pd.to_numeric(shutdown_packets["seq"], errors="coerce").dropna()
+        if not shutdown_seq.empty:
+            total_expected = int(shutdown_seq.max()) + 1
+        else:
+            total_expected = int(max_seq.max()) + 1
+            print(f"[Warning] MSG_SHUTDOWN found but seq invalid. Tail loss may be undetected.")
+    else:
+        # Fall back to max sequence seen, but warn about potential tail loss
+        total_expected = int(max_seq.max()) + 1
+        device_id = group["device_id"].iloc[0] if not group.empty else "unknown"
+        print(f"[Warning] No MSG_SHUTDOWN for device {device_id}. Tail loss may be undetected.")
+
     expected = {msg: 0 for msg in EXPECTED_MSG_TYPES}
 
     expected_startup = 1 if total_expected >= 1 else 0
@@ -272,10 +305,48 @@ def main() -> None:
 
     frame = _load_dataset(latest_log)
 
-    duplicate_count = int(frame["duplicate_flag"].sum())
-    unique_count = int((frame["duplicate_flag"] == 0).sum())
-    gap_count = _sequence_gap_count(frame)
-    rates = _rate_breakdown(unique_count, duplicate_count, gap_count)
+    # Calculate metrics using shutdown-based expected counts
+    total_expected = 0
+    total_unique_received = 0
+    total_duplicates = 0
+    has_shutdown_warning = False
+    
+    for device_id, group in frame.groupby("device_id"):
+        # Check for MSG_SHUTDOWN to get true expected count
+        shutdown_packets = group[group["msg_type"] == MSG_SHUTDOWN]
+        if not shutdown_packets.empty:
+            shutdown_seq = pd.to_numeric(shutdown_packets["seq"], errors="coerce").dropna()
+            if not shutdown_seq.empty:
+                device_expected = int(shutdown_seq.max()) + 1
+            else:
+                device_expected = int(group["seq"].max()) + 1
+                has_shutdown_warning = True
+        else:
+            device_expected = int(group["seq"].max()) + 1
+            has_shutdown_warning = True
+        
+        total_expected += device_expected
+        total_unique_received += int((group["duplicate_flag"] == 0).sum())
+        total_duplicates += int(group["duplicate_flag"].sum())
+    
+    if has_shutdown_warning:
+        print("WARNING: No shutdown packet received for one or more devices. Tail loss detection unreliable.")
+    
+    # Calculate rates using corrected formulas
+    total_received = total_unique_received + total_duplicates  # Total packets in log
+    total_lost = total_expected - total_unique_received
+    
+    if total_expected > 0:
+        loss_pct = (total_lost / total_expected) * 100.0
+        received_pct = (total_unique_received / total_expected) * 100.0
+    else:
+        loss_pct = received_pct = float("nan")
+    
+    # Duplicate % = Total Duplicates / Total Received (as per requirement)
+    if total_received > 0:
+        duplicate_pct = (total_duplicates / total_received) * 100.0
+    else:
+        duplicate_pct = float("nan")
 
     non_duplicate = frame[frame["duplicate_flag"] == 0]
     bytes_series = non_duplicate["packet_size"].dropna()
@@ -283,11 +354,13 @@ def main() -> None:
 
     metrics_rows = [
         ("log_file", latest_log.relative_to(project_root).as_posix(), ""),
-        ("packets_expected", float(rates["expected"]), "unique + inferred gaps"),
-        ("packets_recorded", float(frame.shape[0]), "rows in log"),
-        ("packets_received", float(unique_count), f"{rates['received_pct']:.2f}% of expected"),
-        ("duplicate_rate", rates["duplicate_pct"] / 100.0 if rates["expected"] > 0 else float("nan"), "fraction of expected"),
-        ("sequence_gap_count", float(gap_count), ""),
+        ("packets_expected", float(total_expected), "from shutdown seq or max seq"),
+        ("packets_recorded", float(frame.shape[0]), "rows in log (includes duplicates)"),
+        ("packets_received", float(total_unique_received), f"{received_pct:.2f}% of expected"),
+        ("packets_lost", float(total_lost), f"{loss_pct:.2f}% of expected"),
+        ("duplicates", float(total_duplicates), f"{duplicate_pct:.2f}% of received"),
+        ("loss_rate", loss_pct / 100.0 if total_expected > 0 else float("nan"), "fraction of expected"),
+        ("duplicate_rate", duplicate_pct / 100.0 if total_received > 0 else float("nan"), "fraction of received"),
         ("cpu_ms_per_report", float(cpu_series.mean()) if not cpu_series.empty else float("nan"), "non-duplicates"),
         ("bytes_per_report", float(bytes_series.mean()) if not bytes_series.empty else float("nan"), "non-duplicates"),
     ]
@@ -312,13 +385,13 @@ def main() -> None:
 
     summary_rows = [{
         "packets": int(frame.shape[0]),
-        "expected": rates["expected"],
-        "received": float(unique_count),
-        "received_pct": rates["received_pct"],
-        "lost": float(gap_count),
-        "loss_pct": rates["loss_pct"],
-        "duplicates": float(duplicate_count),
-        "duplicate_pct": rates["duplicate_pct"],
+        "expected": total_expected,
+        "received": float(total_unique_received),
+        "received_pct": received_pct,
+        "lost": float(total_lost),
+        "loss_pct": loss_pct,
+        "duplicates": float(total_duplicates),
+        "duplicate_pct": duplicate_pct,
         "devices": int(frame["device_id"].nunique()),
         "msg_types": int(frame["msg_type"].nunique()),
     }]

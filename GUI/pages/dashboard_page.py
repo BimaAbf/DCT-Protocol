@@ -2,8 +2,8 @@ from __future__ import annotations
 from datetime import datetime
 import pyqtgraph as pg
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QColor
-from PySide6.QtWidgets import QFrame, QGridLayout, QHBoxLayout, QLabel, QPushButton, QScrollArea, QVBoxLayout, QWidget, QTableWidget, QTableWidgetItem, QHeaderView
+from PySide6.QtGui import QColor, QTextCursor
+from PySide6.QtWidgets import QFrame, QGridLayout, QHBoxLayout, QLabel, QPushButton, QScrollArea, QVBoxLayout, QWidget, QTableWidget, QTableWidgetItem, QHeaderView, QTextEdit
 from style.utils import apply_shadow
 
 class DashboardPage(QWidget):
@@ -14,10 +14,13 @@ class DashboardPage(QWidget):
         self.logs_controller = logs_controller
         self.start_time = None
         
-        self.x_data = list(range(20))
-        self.y_data = [0] * 20
-        self.ptr = 19
+        # Graph data - keep 60 seconds of history
+        self.graph_history_size = 60
+        self.x_data = list(range(self.graph_history_size))
+        self.y_data = [0] * self.graph_history_size
+        self.ptr = self.graph_history_size - 1
         self.last_packets = 0
+        self.last_log_packet_count = 0
         
         self.timer = QTimer(self)
         self.timer.setInterval(1000)
@@ -53,10 +56,18 @@ class DashboardPage(QWidget):
         
         self.content_layout.addLayout(row_layout)
         
+        # Server output and clients table row
+        second_row = QHBoxLayout()
+        self.output_card = self._build_output_card()
+        second_row.addWidget(self.output_card, 1)
+        
         self.clients_card = self._build_clients_table()
-        self.content_layout.addWidget(self.clients_card)
+        second_row.addWidget(self.clients_card, 1)
+        
+        self.content_layout.addLayout(second_row)
         
         self.server_controller.statusChanged.connect(self._on_server_status)
+        self.server_controller.outputReceived.connect(self._on_server_output)
         self.clients_controller.clientsUpdated.connect(self._refresh_clients)
         
         if self.logs_controller:
@@ -136,6 +147,8 @@ class DashboardPage(QWidget):
         self.plot_widget.setMouseEnabled(x=False, y=False)
         self.plot_widget.hideButtons()
         self.plot_widget.getPlotItem().getViewBox().setLimits(yMin=0)
+        self.plot_widget.setLabel('bottom', 'Time (seconds)')
+        self.plot_widget.setLabel('left', 'Packets/sec')
         
         fill_color = QColor("#3A7FF9")
         fill_color.setAlpha(40)
@@ -147,9 +160,46 @@ class DashboardPage(QWidget):
             fillLevel=0,
             brush=pg.mkBrush(fill_color)
         )
-        self.plot_widget.setMinimumHeight(180)
+        self.plot_widget.setMinimumHeight(220)
         
         layout.addWidget(self.plot_widget)
+        return card
+
+    def _build_output_card(self):
+        card = QFrame(objectName="OutputCard")
+        card.setProperty("class", "page-card")
+        apply_shadow(card)
+        
+        layout = QVBoxLayout(card)
+        
+        header = QHBoxLayout()
+        header.addWidget(QLabel("Server Output", objectName="SectionHeader"))
+        header.addStretch()
+        
+        clear_btn = QPushButton("Clear")
+        clear_btn.setFixedSize(60, 28)
+        clear_btn.clicked.connect(self._clear_output)
+        header.addWidget(clear_btn)
+        
+        layout.addLayout(header)
+        
+        self.output_text = QTextEdit()
+        self.output_text.setReadOnly(True)
+        self.output_text.setStyleSheet("""
+            QTextEdit {
+                background-color: #0F172A;
+                color: #E2E8F0;
+                border: none;
+                border-radius: 8px;
+                font-family: 'Consolas', 'Monaco', monospace;
+                font-size: 10pt;
+                padding: 10px;
+            }
+        """)
+        self.output_text.setMinimumHeight(200)
+        self.output_text.setMaximumHeight(300)
+        
+        layout.addWidget(self.output_text)
         return card
 
     def _build_clients_table(self):
@@ -172,11 +222,22 @@ class DashboardPage(QWidget):
         table.cellDoubleClicked.connect(lambda r, c: self.clients_controller.select_client(table.item(r, 0).text()) if table.item(r, 0) else None)
         
         table.setFrameShape(QFrame.NoFrame)
-        table.setMinimumHeight(300)
+        table.setMinimumHeight(200)
+        table.setMaximumHeight(300)
         
         layout.addWidget(table)
         return card
 
+    def _clear_output(self):
+        self.output_text.clear()
+
+    def _on_server_output(self, text):
+        """Handle server output and display it in the output panel"""
+        cursor = self.output_text.textCursor()
+        cursor.movePosition(QTextCursor.End)
+        self.output_text.setTextCursor(cursor)
+        self.output_text.insertPlainText(text)
+        self.output_text.ensureCursorVisible()
 
     def _on_server_status(self, running, message):
         self.lbl_status.setText("Running" if running else "Stopped")
@@ -187,10 +248,12 @@ class DashboardPage(QWidget):
             if not self.uptime_timer.isActive():
                 self.uptime_timer.start()
             
-            self.x_data = list(range(20))
-            self.y_data = [0] * 20
-            self.ptr = 19
+            # Reset graph data
+            self.x_data = list(range(self.graph_history_size))
+            self.y_data = [0] * self.graph_history_size
+            self.ptr = self.graph_history_size - 1
             self.last_packets = 0
+            self.last_log_packet_count = 0
             self.curve.setData(self.x_data, self.y_data)
             
             if not self.timer.isActive():
@@ -211,20 +274,43 @@ class DashboardPage(QWidget):
         self.lbl_uptime.setText(f"{seconds // 3600:02d}:{(seconds % 3600) // 60:02d}:{seconds % 60:02d}")
 
     def _update_graph(self):
-        packets, gaps, latency, count, size, size_count = 0, 0, 0.0, 0, 0, 0
+        """Update the packets per second graph using logs data"""
+        total_packets = 0
+        total_gaps = 0
+        total_latency = 0.0
+        latency_count = 0
+        total_size = 0
+        size_count = 0
+        
+        # Get data from logs controller if available
+        if self.logs_controller:
+            for device_id in self.logs_controller.get_device_ids():
+                metrics = self.logs_controller.get_device_metrics(device_id)
+                total_packets += metrics.get("packets", 0)
+                total_gaps += metrics.get("gaps", 0)
+                if metrics.get("avg_latency") is not None:
+                    total_latency += metrics.get("avg_latency", 0)
+                    latency_count += 1
+                if metrics.get("avg_packet_size") is not None:
+                    total_size += metrics.get("avg_packet_size", 0)
+                    size_count += 1
+        
+        # Also aggregate from clients controller
         clients = self.clients_controller.get_clients()
-        
         for client in clients:
-            packets += client.get("packets_sent", 0)
-            gaps += client.get("gaps", 0)
-            latency += client.get("avg_latency", 0)
-            count += 1 if client.get("avg_latency") else 0
-            size += client.get("avg_packet_size", 0)
-            size_count += 1 if client.get("avg_packet_size") else 0
-            
-        pps = max(0, packets - self.last_packets)
-        self.last_packets = packets
+            if not client.get("is_process"):  # Skip process clients, we got them from logs
+                continue
+            # For process clients, get their stats
+            pkts = client.get("packets_sent", 0)
+            if pkts > 0 and client.get("device_id") is None:
+                # This client doesn't have device_id yet, add its packets
+                total_packets += pkts
         
+        # Calculate packets per second (difference from last check)
+        pps = max(0, total_packets - self.last_log_packet_count)
+        self.last_log_packet_count = total_packets
+        
+        # Update graph data
         self.x_data.pop(0)
         self.x_data.append(self.ptr + 1)
         self.ptr += 1
@@ -234,12 +320,28 @@ class DashboardPage(QWidget):
         
         self.curve.setData(self.x_data, self.y_data)
         
-        self.lbl_total_packets.setText(f"{packets:,}")
-        self.lbl_loss.setText(f"{(gaps / (packets + gaps) * 100):.2f}%" if packets + gaps > 0 else "0.00%")
-        self.lbl_latency.setText(f"{(latency / count):.1f} ms" if count > 0 else "0.0 ms")
+        # Update network health stats
+        self.lbl_total_packets.setText(f"{total_packets:,}")
         
-        bps = pps * (size / size_count if size_count > 0 else 0)
-        self.lbl_throughput.setText(f"{bps / 1024:.1f} KB/s" if bps > 1024 else f"{int(bps)} B/s")
+        if total_packets + total_gaps > 0:
+            loss_pct = (total_gaps / (total_packets + total_gaps)) * 100
+            self.lbl_loss.setText(f"{loss_pct:.2f}%")
+        else:
+            self.lbl_loss.setText("0.00%")
+        
+        if latency_count > 0:
+            avg_lat = total_latency / latency_count
+            self.lbl_latency.setText(f"{avg_lat:.1f} ms")
+        else:
+            self.lbl_latency.setText("0.0 ms")
+        
+        # Calculate throughput
+        avg_size = total_size / size_count if size_count > 0 else 10  # Default 10 bytes
+        bps = pps * avg_size
+        if bps > 1024:
+            self.lbl_throughput.setText(f"{bps / 1024:.1f} KB/s")
+        else:
+            self.lbl_throughput.setText(f"{int(bps)} B/s")
 
     def _refresh_clients(self, clients):
         table = self.clients_card.findChild(QTableWidget)
@@ -247,7 +349,18 @@ class DashboardPage(QWidget):
             table.setRowCount(len(clients))
             
         for row, client in enumerate(clients):
-            device_id = client.get("device_id") or "Unknown"
+            # Get display name
+            device_id = client.get("device_id")
+            mac = client.get("mac", "")
+            is_process = client.get("is_process", False)
+            
+            if device_id:
+                display_name = f"Device {device_id}"
+            elif mac:
+                display_name = mac[:8] + "..."
+            else:
+                display_name = "Unknown"
+                
             last_seen = str(client.get("last_seen") or "-")
             packets = int(client.get("packets_sent", 0))
             duplicates = int(client.get("duplicates", 0))
@@ -256,7 +369,7 @@ class DashboardPage(QWidget):
             latency = f"{client.get('avg_latency'):.1f} ms" if client.get("avg_latency") else "-"
             loss = f"{(gaps / (packets + gaps) * 100):.1f}%" if packets + gaps > 0 else "0.0%"
             
-            for col, text in enumerate([device_id, last_seen, latency, loss, str(packets)]):
+            for col, text in enumerate([display_name, last_seen, latency, loss, str(packets)]):
                 item = table.item(row, col)
                 if not item:
                     table.setItem(row, col, QTableWidgetItem(text))
@@ -281,7 +394,25 @@ class DashboardPage(QWidget):
             dot = widget.findChild(QLabel, "StatusDot")
             text_label = widget.findChild(QLabel, "StatusText")
             
-            if duplicates == 0 and gaps == 0:
+            # Handle status based on process state or metrics
+            status = client.get("status", "")
+            if is_process and status in ("pending", "connecting"):
+                dot.setStyleSheet("background:#F59E0B;border-radius:5px")
+                text_label.setText(status.capitalize())
+                text_label.setStyleSheet("color:#F59E0B")
+            elif is_process and status == "running":
+                dot.setStyleSheet("background:#10B981;border-radius:5px")
+                text_label.setText("Running")
+                text_label.setStyleSheet("color:#10B981")
+            elif is_process and status == "failed":
+                dot.setStyleSheet("background:#EF4444;border-radius:5px")
+                text_label.setText("Failed")
+                text_label.setStyleSheet("color:#EF4444")
+            elif is_process and status == "completed":
+                dot.setStyleSheet("background:#3B82F6;border-radius:5px")
+                text_label.setText("Done")
+                text_label.setStyleSheet("color:#3B82F6")
+            elif duplicates == 0 and gaps == 0:
                 dot.setStyleSheet("background:#10B981;border-radius:5px")
                 text_label.setText("Good")
                 text_label.setStyleSheet("color:#10B981")

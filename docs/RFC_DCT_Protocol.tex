@@ -1,0 +1,659 @@
+\documentclass[11pt,a4paper]{article}
+
+% Packages
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{geometry}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{array}
+\usepackage{multirow}
+\usepackage{float}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{fancyhdr}
+\usepackage{titlesec}
+\usepackage{caption}
+\usepackage{enumitem}
+\usepackage{tikz}
+\usetikzlibrary{shapes,arrows,positioning}
+
+% Page geometry
+\geometry{margin=1in}
+
+% Header/Footer
+\pagestyle{fancy}
+\fancyhf{}
+\rhead{RFC: DCT Protocol}
+\lhead{Version 1.0}
+\rfoot{Page \thepage}
+
+% Code listing style
+\lstdefinestyle{binary}{
+    basicstyle=\ttfamily\small,
+    frame=single,
+    backgroundcolor=\color{gray!10},
+    breaklines=true
+}
+
+\lstdefinestyle{hex}{
+    basicstyle=\ttfamily\small,
+    frame=single,
+    backgroundcolor=\color{blue!5},
+    breaklines=true
+}
+
+% Hyperlink setup
+\hypersetup{
+    colorlinks=true,
+    linkcolor=blue,
+    filecolor=magenta,
+    urlcolor=cyan,
+    citecolor=blue
+}
+
+% Custom commands for RFC style
+\newcommand{\MUST}{\textbf{MUST}}
+\newcommand{\MUSTNOT}{\textbf{MUST NOT}}
+\newcommand{\SHOULD}{\textbf{SHOULD}}
+\newcommand{\SHOULDNOT}{\textbf{SHOULD NOT}}
+\newcommand{\MAY}{\textbf{MAY}}
+\newcommand{\REQUIRED}{\textbf{REQUIRED}}
+\newcommand{\OPTIONAL}{\textbf{OPTIONAL}}
+
+% Title
+\title{
+    \vspace{-2cm}
+    \textbf{Request for Comments: DCT-001}\\
+    \vspace{0.5cm}
+    \Large{Data Collection Telemetry (DCT) Protocol}\\
+    \vspace{0.3cm}
+    \large{Specification Version 1.0}
+}
+
+\author{
+    DCT Protocol Working Group\\
+    \texttt{dct-protocol@example.com}
+}
+
+\date{December 2025}
+
+\begin{document}
+
+\maketitle
+
+%==============================================================================
+\section*{Status of This Memo}
+%==============================================================================
+
+This document specifies a protocol for the transmission of telemetry data from IoT devices to collection servers. Distribution of this memo is unlimited.
+
+%==============================================================================
+\section*{Abstract}
+%==============================================================================
+
+The Data Collection Telemetry (DCT) Protocol is a lightweight, binary protocol designed for efficient transmission of sensor and telemetry data from resource-constrained IoT devices to centralized collection servers. This specification defines the message formats, transmission procedures, and operational semantics of the protocol. DCT operates over UDP and employs delta compression, batching, and efficient binary encoding to minimize bandwidth consumption while providing mechanisms for loss detection and device management.
+
+\newpage
+\tableofcontents
+\newpage
+
+%==============================================================================
+\section{Introduction}
+%==============================================================================
+
+\subsection{Purpose}
+
+The Data Collection Telemetry (DCT) Protocol addresses the need for an efficient, lightweight protocol suitable for transmitting periodic sensor readings from IoT devices. Unlike text-based protocols such as HTTP/JSON or verbose binary protocols, DCT is optimized for:
+
+\begin{itemize}
+    \item Minimal header overhead (8 bytes fixed header)
+    \item Delta compression for slowly-changing values
+    \item Optional batching to amortize header costs
+    \item Simple implementation suitable for microcontrollers
+\end{itemize}
+
+\subsection{Scope}
+
+This specification defines:
+
+\begin{itemize}
+    \item Message format and encoding
+    \item Connection establishment and teardown
+    \item Data transmission modes
+    \item Sequence number handling
+    \item Time synchronization
+    \item Error detection mechanisms
+\end{itemize}
+
+\subsection{Terminology}
+
+The key words ``MUST'', ``MUST NOT'', ``REQUIRED'', ``SHALL'', ``SHALL NOT'', ``SHOULD'', ``SHOULD NOT'', ``RECOMMENDED'', ``MAY'', and ``OPTIONAL'' in this document are to be interpreted as described in RFC 2119.
+
+\begin{description}[style=nextline]
+    \item[Device] An IoT sensor or data source that transmits telemetry data.
+    \item[Server] The collection endpoint that receives and processes telemetry.
+    \item[Session] A logical connection between a device and server.
+    \item[Keyframe] An absolute value transmission.
+    \item[Delta] A relative value transmission (difference from previous).
+    \item[Batch] Multiple data points aggregated in a single packet.
+\end{description}
+
+%==============================================================================
+\section{Protocol Overview}
+%==============================================================================
+
+\subsection{Transport}
+
+DCT operates over the User Datagram Protocol (UDP) as defined in RFC 768. The default port number is \textbf{5000}, though implementations \MAY{} use alternative ports.
+
+\subsection{Byte Order}
+
+All multi-byte numeric fields in DCT messages \MUST{} be transmitted in network byte order (big-endian).
+
+\subsection{Session Model}
+
+DCT uses a soft-state session model:
+
+\begin{enumerate}
+    \item Device initiates session with STARTUP message
+    \item Server responds with STARTUP\_ACK containing Device ID
+    \item Device transmits data using assigned Device ID
+    \item Either party may terminate with SHUTDOWN
+    \item Sessions timeout after prolonged inactivity
+\end{enumerate}
+
+%==============================================================================
+\section{Message Format}
+%==============================================================================
+
+\subsection{Common Header}
+
+All DCT messages share a common 8-byte header:
+
+\begin{table}[H]
+\centering
+\caption{DCT Message Header Format}
+\begin{tabular}{|c|c|c|c|c|c|c|c|}
+\hline
+\multicolumn{8}{|c|}{\textbf{Byte Offset}} \\
+\hline
+0 & 1 & 2 & 3 & 4 & 5 & 6 & 7 \\
+\hline
+\multicolumn{1}{|c|}{Ver/Type} & \multicolumn{2}{c|}{Device ID} & \multicolumn{2}{c|}{Sequence} & \multicolumn{2}{c|}{Time Offset} & Length \\
+\hline
+\end{tabular}
+\end{table}
+
+\subsubsection{Version/Type Field (1 byte)}
+
+\begin{itemize}
+    \item \textbf{Bits 7-4}: Protocol version (current: 0x01)
+    \item \textbf{Bits 3-0}: Message type identifier
+\end{itemize}
+
+Combined as: \texttt{(version << 4) | type}
+
+\subsubsection{Device ID (2 bytes)}
+
+A 16-bit unsigned integer assigned by the server during registration. Devices \MUST{} use 0x0000 in STARTUP messages before receiving their assigned ID.
+
+\subsubsection{Sequence Number (2 bytes)}
+
+A 16-bit unsigned integer that \MUST{} be incremented for each message sent by a device. The sequence number wraps from 65535 to 0.
+
+\subsubsection{Time Offset (2 bytes)}
+
+A 16-bit unsigned integer representing seconds elapsed since the base timestamp established during TIME\_SYNC. Maximum representable offset is 65535 seconds (~18.2 hours).
+
+\subsubsection{Payload Length (1 byte)}
+
+An 8-bit unsigned integer specifying the number of payload bytes following the header. Maximum payload size is 255 bytes.
+
+\subsection{Struct Format}
+
+In Python struct notation, the header format is:
+\begin{lstlisting}[style=binary]
+!BHHHB
+\end{lstlisting}
+
+Where:
+\begin{itemize}
+    \item \texttt{!} = Network byte order (big-endian)
+    \item \texttt{B} = Unsigned char (Version/Type)
+    \item \texttt{H} = Unsigned short (Device ID)
+    \item \texttt{H} = Unsigned short (Sequence)
+    \item \texttt{H} = Unsigned short (Time Offset)
+    \item \texttt{B} = Unsigned char (Length)
+\end{itemize}
+
+%==============================================================================
+\section{Message Types}
+%==============================================================================
+
+\begin{table}[H]
+\centering
+\caption{DCT Message Types}
+\begin{tabular}{|c|l|l|}
+\hline
+\textbf{Value} & \textbf{Name} & \textbf{Description} \\
+\hline
+0x01 & MSG\_STARTUP & Device registration request \\
+0x02 & MSG\_STARTUP\_ACK & Server registration acknowledgment \\
+0x03 & MSG\_TIME\_SYNC & Time base synchronization \\
+0x04 & MSG\_KEYFRAME & Absolute value transmission \\
+0x05 & MSG\_DATA\_DELTA & Delta value transmission \\
+0x06 & MSG\_HEARTBEAT & Keep-alive signal \\
+0x07 & MSG\_BATCHED\_DATA & Aggregated data transmission \\
+0x0B & MSG\_SHUTDOWN & Session termination \\
+0x0C & MSG\_BATCH\_INCOMPLETE & Incomplete batch marker \\
+\hline
+\end{tabular}
+\end{table}
+
+\subsection{MSG\_STARTUP (0x01)}
+
+Sent by a device to initiate a session with the server.
+
+\begin{lstlisting}[style=binary]
+Header:
+  Version/Type: 0x11 (version 1, type 1)
+  Device ID:    0x0000 (not yet assigned)
+  Sequence:     0x0000 (initial)
+  Time Offset:  0x0000
+  Length:       6 or 7
+
+Payload:
+  Bytes 0-5:  MAC Address (6 bytes)
+  Byte 6:     Batch Size (optional, 1 byte)
+\end{lstlisting}
+
+If Batch Size is provided and greater than 1, the device requests batched transmission mode.
+
+\subsection{MSG\_STARTUP\_ACK (0x02)}
+
+Sent by the server to acknowledge device registration.
+
+\begin{lstlisting}[style=binary]
+Header:
+  Version/Type: 0x12 (version 1, type 2)
+  Device ID:    Assigned device ID
+  Sequence:     0x0000
+  Time Offset:  0x0000
+  Length:       2 or 4
+
+Payload (New Device):
+  Bytes 0-1:  Assigned Device ID (2 bytes)
+
+Payload (Reconnecting Device):
+  Bytes 0-1:  Device ID (2 bytes)
+  Bytes 2-3:  Last Known Sequence (2 bytes)
+\end{lstlisting}
+
+\subsection{MSG\_TIME\_SYNC (0x03)}
+
+Establishes the base timestamp for relative time calculations.
+
+\begin{lstlisting}[style=binary]
+Header:
+  Version/Type: 0x13 (version 1, type 3)
+  Device ID:    Assigned ID
+  Sequence:     Current sequence
+  Time Offset:  0x0000
+  Length:       4
+
+Payload:
+  Bytes 0-3:  Unix Timestamp (4 bytes, unsigned)
+\end{lstlisting}
+
+Devices \SHOULD{} send TIME\_SYNC:
+\begin{itemize}
+    \item Immediately after receiving STARTUP\_ACK
+    \item Periodically (recommended: every hour)
+    \item When time offset approaches 65535
+\end{itemize}
+
+\subsection{MSG\_KEYFRAME (0x04)}
+
+Transmits an absolute sensor value.
+
+\begin{lstlisting}[style=binary]
+Header:
+  Version/Type: 0x14 (version 1, type 4)
+  Device ID:    Assigned ID
+  Sequence:     Current sequence
+  Time Offset:  Seconds since base time
+  Length:       2
+
+Payload:
+  Bytes 0-1:  Value (2 bytes, signed, big-endian)
+\end{lstlisting}
+
+Value range: -32768 to +32767
+
+Keyframes \SHOULD{} be sent:
+\begin{itemize}
+    \item As the first data message after registration
+    \item Periodically (recommended: every 10th message)
+    \item When delta would exceed 8-bit range
+    \item After extended silence
+\end{itemize}
+
+\subsection{MSG\_DATA\_DELTA (0x05)}
+
+Transmits the difference from the previous value.
+
+\begin{lstlisting}[style=binary]
+Header:
+  Version/Type: 0x15 (version 1, type 5)
+  Device ID:    Assigned ID
+  Sequence:     Current sequence
+  Time Offset:  Seconds since base time
+  Length:       1
+
+Payload:
+  Byte 0:  Delta (1 byte, signed)
+\end{lstlisting}
+
+Delta range: -128 to +127
+
+The receiver reconstructs the absolute value:
+\begin{equation}
+\text{current\_value} = \text{previous\_value} + \text{delta}
+\end{equation}
+
+\subsection{MSG\_HEARTBEAT (0x06)}
+
+Indicates device liveness without transmitting data.
+
+\begin{lstlisting}[style=binary]
+Header:
+  Version/Type: 0x16 (version 1, type 6)
+  Device ID:    Assigned ID
+  Sequence:     Current sequence
+  Time Offset:  Seconds since base time
+  Length:       0
+
+Payload: None
+\end{lstlisting}
+
+Heartbeats \SHOULD{} be sent when:
+\begin{itemize}
+    \item Sensor value unchanged beyond threshold
+    \item Maintaining session during idle periods
+\end{itemize}
+
+\subsection{MSG\_BATCHED\_DATA (0x07)}
+
+Aggregates multiple data points in a single packet.
+
+\begin{lstlisting}[style=binary]
+Header:
+  Version/Type: 0x17 (version 1, type 7)
+  Device ID:    Assigned ID
+  Sequence:     Current sequence
+  Time Offset:  0x0000 (not used)
+  Length:       Variable
+
+Payload:
+  Repeated entries, each containing:
+    - Time Offset: 2 bytes
+    - Type:        1 byte (0x04 or 0x05)
+    - Data:        1-2 bytes (depending on type)
+\end{lstlisting}
+
+Entry size: 4 bytes (delta) or 5 bytes (keyframe)
+
+\subsection{MSG\_SHUTDOWN (0x0B)}
+
+Gracefully terminates a session.
+
+\begin{lstlisting}[style=binary]
+Header:
+  Version/Type: 0x1B (version 1, type 11)
+  Device ID:    Assigned ID
+  Sequence:     Current sequence
+  Time Offset:  Seconds since base time
+  Length:       0
+
+Payload: None
+\end{lstlisting}
+
+%==============================================================================
+\section{Connection Lifecycle}
+%==============================================================================
+
+\subsection{Registration}
+
+\begin{enumerate}
+    \item Device sends MSG\_STARTUP with MAC address
+    \item Server checks if MAC is known:
+    \begin{itemize}
+        \item New device: Assigns new Device ID
+        \item Known device: Returns existing ID and last sequence
+    \end{itemize}
+    \item Server sends MSG\_STARTUP\_ACK
+    \item Device stores assigned ID for session
+\end{enumerate}
+
+\subsection{Data Transmission}
+
+After registration, devices transmit data following this pattern:
+
+\begin{enumerate}
+    \item Send MSG\_TIME\_SYNC to establish base time
+    \item Send MSG\_KEYFRAME with initial value
+    \item For subsequent readings:
+    \begin{itemize}
+        \item If $|\text{delta}| \leq 127$: Send MSG\_DATA\_DELTA
+        \item If $|\text{delta}| > 127$: Send MSG\_KEYFRAME
+        \item If unchanged: Send MSG\_HEARTBEAT (optional)
+    \end{itemize}
+    \item Periodically send MSG\_KEYFRAME for recovery
+\end{enumerate}
+
+\subsection{Session Termination}
+
+Normal termination:
+\begin{enumerate}
+    \item Device sends MSG\_SHUTDOWN
+    \item Server marks device as inactive
+    \item Server \MAY{} retain device state for reconnection
+\end{enumerate}
+
+Timeout termination:
+\begin{enumerate}
+    \item Server monitors last-seen timestamps
+    \item If no message received for timeout period, session is marked inactive
+    \item Default timeout: 10x average message interval
+\end{enumerate}
+
+%==============================================================================
+\section{Sequence Number Handling}
+%==============================================================================
+
+\subsection{Wraparound}
+
+Sequence numbers are 16-bit unsigned integers that wrap from 65535 to 0. Implementations \MUST{} handle wraparound correctly using modular arithmetic:
+
+\begin{equation}
+\text{forward\_step} = (\text{received\_seq} - \text{expected\_seq}) \mod 65536
+\end{equation}
+
+\subsection{Gap Detection}
+
+When a gap is detected:
+\begin{enumerate}
+    \item Mark missing sequence numbers
+    \item Accept the new packet
+    \item If missing packet arrives later, clear from missing set
+\end{enumerate}
+
+\subsection{Duplicate Detection}
+
+A packet is considered duplicate if:
+\begin{itemize}
+    \item Sequence number is behind current and not in missing set
+    \item Exact sequence already received (within window)
+\end{itemize}
+
+%==============================================================================
+\section{Time Synchronization}
+%==============================================================================
+
+\subsection{Base Time}
+
+Each device maintains a base timestamp established via MSG\_TIME\_SYNC. All subsequent Time Offset values are relative to this base:
+
+\begin{equation}
+\text{actual\_time} = \text{base\_time} + \text{time\_offset}
+\end{equation}
+
+\subsection{Re-synchronization}
+
+Devices \SHOULD{} re-synchronize when:
+\begin{itemize}
+    \item Time offset exceeds 60000 (approaching limit)
+    \item Clock drift detected
+    \item After extended disconnection
+\end{itemize}
+
+%==============================================================================
+\section{Error Detection}
+%==============================================================================
+
+\subsection{Packet Classification}
+
+Servers classify each received packet as:
+\begin{itemize}
+    \item \textbf{Normal}: Expected sequence, no issues
+    \item \textbf{Duplicate}: Already received
+    \item \textbf{Gap}: Sequence jump indicates loss
+    \item \textbf{Delayed}: Previously missing, now arrived
+\end{itemize}
+
+\subsection{Recovery Strategies}
+
+DCT does not mandate retransmission. Recommended strategies:
+\begin{itemize}
+    \item Periodic keyframes for delta recovery
+    \item Interpolation for missing values
+    \item Logging gaps for analysis
+\end{itemize}
+
+%==============================================================================
+\section{Security Considerations}
+%==============================================================================
+
+\subsection{Current Limitations}
+
+This version of DCT does not include:
+\begin{itemize}
+    \item Authentication
+    \item Encryption
+    \item Integrity protection
+\end{itemize}
+
+\subsection{Deployment Recommendations}
+
+For production use:
+\begin{itemize}
+    \item Deploy on trusted networks only
+    \item Use VPN or IPsec for transport security
+    \item Consider DTLS wrapper for untrusted networks
+    \item Implement rate limiting on servers
+\end{itemize}
+
+%==============================================================================
+\section{IANA Considerations}
+%==============================================================================
+
+This document requests no IANA actions. The default port 5000 is used by convention and is not registered.
+
+%==============================================================================
+\appendix
+\section{Message Type Quick Reference}
+%==============================================================================
+
+\begin{table}[H]
+\centering
+\caption{Message Type Summary}
+\begin{tabular}{|l|c|c|l|}
+\hline
+\textbf{Type} & \textbf{Code} & \textbf{Payload} & \textbf{Direction} \\
+\hline
+STARTUP & 0x01 & 6-7 B & Device $\rightarrow$ Server \\
+STARTUP\_ACK & 0x02 & 2-4 B & Server $\rightarrow$ Device \\
+TIME\_SYNC & 0x03 & 4 B & Device $\rightarrow$ Server \\
+KEYFRAME & 0x04 & 2 B & Device $\rightarrow$ Server \\
+DATA\_DELTA & 0x05 & 1 B & Device $\rightarrow$ Server \\
+HEARTBEAT & 0x06 & 0 B & Device $\rightarrow$ Server \\
+BATCHED\_DATA & 0x07 & Variable & Device $\rightarrow$ Server \\
+SHUTDOWN & 0x0B & 0 B & Bidirectional \\
+\hline
+\end{tabular}
+\end{table}
+
+%==============================================================================
+\section{Example Message Captures}
+%==============================================================================
+
+\subsection{STARTUP Message}
+
+\begin{lstlisting}[style=hex]
+Hex: 11 00 00 00 00 00 00 06 AA BB CC DD EE FF
+     |  |     |     |     |  |________________|
+     |  |     |     |     |   MAC Address
+     |  |     |     |     Length (6)
+     |  |     |     Time Offset (0)
+     |  |     Sequence (0)
+     |  Device ID (0)
+     Version 1, Type 1
+\end{lstlisting}
+
+\subsection{KEYFRAME Message}
+
+\begin{lstlisting}[style=hex]
+Hex: 14 00 05 00 0A 00 3C 02 00 64
+     |  |     |     |     |  |___|
+     |  |     |     |     |  Value (100)
+     |  |     |     |     Length (2)
+     |  |     |     Time Offset (60)
+     |  |     Sequence (10)
+     |  Device ID (5)
+     Version 1, Type 4
+\end{lstlisting}
+
+\subsection{DATA\_DELTA Message}
+
+\begin{lstlisting}[style=hex]
+Hex: 15 00 05 00 0B 00 3D 01 05
+     |  |     |     |     |  |
+     |  |     |     |     |  Delta (+5)
+     |  |     |     |     Length (1)
+     |  |     |     Time Offset (61)
+     |  |     Sequence (11)
+     |  Device ID (5)
+     Version 1, Type 5
+\end{lstlisting}
+
+%==============================================================================
+\begin{thebibliography}{9}
+
+\bibitem{rfc768}
+J. Postel,
+``User Datagram Protocol,''
+RFC 768, August 1980.
+
+\bibitem{rfc2119}
+S. Bradner,
+``Key words for use in RFCs to Indicate Requirement Levels,''
+RFC 2119, March 1997.
+
+\end{thebibliography}
+
+\end{document}

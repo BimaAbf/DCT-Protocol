@@ -1,11 +1,12 @@
 from __future__ import annotations
 from typing import Any, Dict
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import QFrame, QLabel, QWidget, QGridLayout, QVBoxLayout, QHBoxLayout
+from PySide6.QtWidgets import QFrame, QLabel, QWidget, QGridLayout, QVBoxLayout, QHBoxLayout, QPushButton
 from style.utils import apply_shadow
 
 class ClientCard(QWidget):
     clicked = Signal(dict)
+    stopRequested = Signal(str)  # MAC address
 
     def __init__(self, client: Dict[str, Any] | None = None, position: int | None = None):
         super().__init__()
@@ -50,7 +51,7 @@ class ClientCard(QWidget):
         self.device_label.setObjectName("ClientName")
         header_layout.addWidget(self.device_label)
         
-        # Online/Offline Indicator
+        # Online/Offline/Status Indicator
         self.online_indicator = QWidget()
         layout_indicator = QHBoxLayout(self.online_indicator)
         layout_indicator.setContentsMargins(10, 0, 0, 0)
@@ -68,6 +69,27 @@ class ClientCard(QWidget):
         header_layout.addWidget(self.online_indicator)
 
         header_layout.addStretch()
+        
+        # Stop button for active processes
+        self.stop_btn = QPushButton("Stop")
+        self.stop_btn.setFixedSize(60, 28)
+        self.stop_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #EF4444;
+                color: white;
+                border: none;
+                border-radius: 6px;
+                font-size: 11px;
+                font-weight: 600;
+            }
+            QPushButton:hover {
+                background-color: #DC2626;
+            }
+        """)
+        self.stop_btn.clicked.connect(self._on_stop_clicked)
+        self.stop_btn.hide()
+        header_layout.addWidget(self.stop_btn)
+        
         self.packet_summary = QLabel("0 packets")
         self.packet_summary.setObjectName("ClientPackets")
         header_layout.addWidget(self.packet_summary)
@@ -81,9 +103,9 @@ class ClientCard(QWidget):
         self.labels = {}
         stats = [
             ("server_ip", "Server IP:", 0, 0), ("port", "Port:", 0, 1),
-            ("interval", "Interval:", 0, 2), ("batching", "Batching:", 0, 3),
+            ("interval", "Interval:", 0, 2), ("runtime", "Runtime:", 0, 3),
             ("mac", "MAC Address:", 1, 0), ("last_seen", "Last Activity:", 1, 1),
-            ("duplicates", "Duplicates:", 1, 2)
+            ("duplicates", "Duplicates:", 1, 2), ("device_id", "Device ID:", 1, 3)
         ]
 
         for key, text, r, c in stats:
@@ -105,6 +127,11 @@ class ClientCard(QWidget):
         if client:
             self.update_data(client, position)
 
+    def _on_stop_clicked(self):
+        mac = self.client_data.get("mac")
+        if mac:
+            self.stopRequested.emit(mac)
+
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
             self.clicked.emit(self.client_data)
@@ -112,26 +139,68 @@ class ClientCard(QWidget):
 
     def update_data(self, client: Dict[str, Any], position: int | None = None):
         self.client_data = client
-        self.device_label.setText(f"Client {position + 1}" if position is not None else (client.get("device_id") or client.get("name") or "Unknown"))
         
-        is_online = client.get("is_online", False)
-        if is_online:
-            self.online_dot.setStyleSheet("background-color: #10B981; border-radius: 4px;")
-            self.online_text.setText("Online")
-            self.online_text.setStyleSheet("color: #10B981; font-size: 12px; font-weight: 600;")
+        # Determine title
+        device_id = client.get("device_id")
+        if position is not None:
+            self.device_label.setText(f"Client {position + 1}")
+        elif device_id:
+            self.device_label.setText(f"Device {device_id}")
         else:
-            self.online_dot.setStyleSheet("background-color: #94A3B8; border-radius: 4px;")
-            self.online_text.setText("Offline")
-            self.online_text.setStyleSheet("color: #94A3B8; font-size: 12px; font-weight: 500;")
+            self.device_label.setText(client.get("name", "Unknown Client"))
+        
+        # Handle status based on whether this is a managed process or log-based client
+        is_process = client.get("is_process", False)
+        status = client.get("status", "")
+        is_online = client.get("is_online", False)
+        
+        # Show/hide stop button for active processes
+        if is_process and status in ("pending", "connecting", "running"):
+            self.stop_btn.show()
+        else:
+            self.stop_btn.hide()
+        
+        # Set status indicator
+        if is_process:
+            status_config = {
+                "pending": ("#94A3B8", "Pending"),
+                "connecting": ("#F59E0B", "Connecting"),
+                "running": ("#10B981", "Running"),
+                "completed": ("#3B82F6", "Completed"),
+                "failed": ("#EF4444", "Failed"),
+            }
+            color, text = status_config.get(status, ("#94A3B8", "Unknown"))
+            self.online_dot.setStyleSheet(f"background-color: {color}; border-radius: 4px;")
+            self.online_text.setText(text)
+            self.online_text.setStyleSheet(f"color: {color}; font-size: 12px; font-weight: 600;")
+        else:
+            if is_online:
+                self.online_dot.setStyleSheet("background-color: #10B981; border-radius: 4px;")
+                self.online_text.setText("Online")
+                self.online_text.setStyleSheet("color: #10B981; font-size: 12px; font-weight: 600;")
+            else:
+                self.online_dot.setStyleSheet("background-color: #94A3B8; border-radius: 4px;")
+                self.online_text.setText("Offline")
+                self.online_text.setStyleSheet("color: #94A3B8; font-size: 12px; font-weight: 500;")
 
         pkts = client.get("packets_sent") if client.get("packets_sent") is not None else client.get("packets", 0)
         self.packet_summary.setText(f"{pkts} packet{'s' if pkts != 1 else ''}")
 
         self.labels["server_ip"].setText(self._val(client, "ip", "ip_address", "server_ip", default="127.0.0.1"))
-        self.labels["port"].setText(str(client.get("port") or client.get("server_port") or 0))
+        self.labels["port"].setText(str(client.get("port") or client.get("server_port") or 5000))
         
-        batching = client.get("batching") if client.get("batching") is not None else client.get("batching_enabled")
-        self.labels["batching"].setText("Enabled" if batching in (True, "Enabled", 1) else "Disabled")
+        # Format runtime
+        runtime_secs = client.get("runtime_seconds", 0)
+        if runtime_secs and runtime_secs > 0:
+            hours = int(runtime_secs // 3600)
+            mins = int((runtime_secs % 3600) // 60)
+            secs = int(runtime_secs % 60)
+            if hours > 0:
+                self.labels["runtime"].setText(f"{hours:02d}:{mins:02d}:{secs:02d}")
+            else:
+                self.labels["runtime"].setText(f"{mins:02d}:{secs:02d}")
+        else:
+            self.labels["runtime"].setText("-")
 
         self.labels["mac"].setText(self._val(client, "mac", "mac_address", default="00:00:00:00:00:00"))
         self.labels["last_seen"].setText(client.get("last_seen") or client.get("last_activity") or "-")
@@ -141,8 +210,22 @@ class ClientCard(QWidget):
 
         dup = client.get("duplicates", 0)
         self.labels["duplicates"].setText(str(dup))
+        
+        # Device ID
+        self.labels["device_id"].setText(str(device_id) if device_id else "-")
 
-        color = "#10B981" if dup == 0 else "#F59E0B" if dup <= 2 else "#EF4444"
+        # Status bar color based on health
+        gaps = client.get("gaps", 0)
+        if is_process and status in ("pending", "connecting"):
+            color = "#F59E0B"  # Yellow for pending
+        elif is_process and status == "failed":
+            color = "#EF4444"  # Red for failed
+        elif dup == 0 and gaps == 0:
+            color = "#10B981"  # Green
+        elif dup > 0:
+            color = "#F59E0B"  # Yellow for duplicates
+        else:
+            color = "#EF4444"  # Red for gaps/loss
         self.status_bar.setStyleSheet(f"background-color: {color}; border-radius: 40px;")
 
     def _val(self, data: Dict, *keys: str, default: str = "-") :

@@ -12,10 +12,11 @@ class LogsController(QObject):
         super().__init__()
         base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         
-        # Read CSV_LOG_DIR from .env file
+        # Default to Server/logs directory
         if logs_dir is None:
+            # First, try reading from .env file
             env_path = os.path.join(base_dir, ".env")
-            csv_log_dir = "./logs"  # default
+            csv_log_dir = None
             if os.path.exists(env_path):
                 try:
                     with open(env_path) as f:
@@ -27,10 +28,23 @@ class LogsController(QObject):
                                     break
                 except Exception:
                     pass
-            # Resolve relative path from project root
-            if csv_log_dir.startswith("./"):
-                csv_log_dir = csv_log_dir[2:]
-            self.logs_dir = os.path.join(base_dir, csv_log_dir)
+            
+            # Resolve the log directory - check multiple possible locations
+            if csv_log_dir:
+                # Try relative to Server directory first
+                server_log_dir = os.path.join(base_dir, "Server", csv_log_dir.lstrip("./"))
+                if os.path.exists(server_log_dir):
+                    self.logs_dir = server_log_dir
+                else:
+                    # Try relative to base directory
+                    base_log_dir = os.path.join(base_dir, csv_log_dir.lstrip("./"))
+                    if os.path.exists(base_log_dir):
+                        self.logs_dir = base_log_dir
+                    else:
+                        # Default to Server/logs
+                        self.logs_dir = os.path.join(base_dir, "Server", "logs")
+            else:
+                self.logs_dir = os.path.join(base_dir, "Server", "logs")
         else:
             self.logs_dir = logs_dir
         
